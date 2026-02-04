@@ -3,6 +3,7 @@ builder = "nixpacks"
 
 [build.env]
 NIXPACKS_PYTHON_VERSION = "3.11"
+NIXPACKS_APT_PKGS = "libgl1 libglib2.0-0 libxcb1 libx11-xcb1 libxcb-render0 libxcb-shape0 libxcb-xfixes0"
 
 [deploy]
 startCommand = "python3 -m gunicorn app:app --bind 0.0.0.0:$PORT"
