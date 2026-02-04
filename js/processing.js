@@ -3,8 +3,8 @@
 // Profesyonel PDF Isleme ve Ceviri Sistemi
 // ====================================
 
-// Backend URL - Production veya Local
-var BACKEND_URL = window.BACKEND_URL || 'http://localhost:5000';
+// Backend URL - Railway Production
+var BACKEND_URL = 'https://web-production-8310a.up.railway.app';
 
 // ====================================
 // ANA İŞLEM FONKSİYONU
