@@ -1,10 +1,26 @@
+# PDF Komuta Merkezi - Backend Gereksinimleri
+# Railway ve Vercel deploy için optimize edilmiş
+
+# Web Framework
 flask
 flask-cors
-PyMuPDF
-opencv-python-headless
-pdf2docx
-pandas
-openpyxl
 gunicorn
+
+# PDF İşleme
+PyMuPDF
+pdf2docx
 Pillow
 python-docx
+
+# Veri İşleme
+pandas
+openpyxl
+
+# Görüntü İşleme (Headless - sunucu ortamları için)
+opencv-python-headless
+
+# Çeviri ve AI (Ücretsiz API)
+google-generativeai
+
+# Yapılandırma
+python-dotenv
