@@ -3,8 +3,8 @@
 // Profesyonel PDF Isleme ve Ceviri Sistemi
 // ====================================
 
-// Backend URL - Railway Production
-var BACKEND_URL = 'https://web-production-8310a.up.railway.app';
+// Backend URL - config.js'den alınıyor
+// Railway deploy tamamlandığında js/config.js içindeki URL'yu güncelleyin
 
 // ====================================
 // ANA İŞLEM FONKSİYONU
