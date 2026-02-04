@@ -1,0 +1,28 @@
+[phases.setup]
+nixPkgs = ["python311", "python311Packages.pip", "python311Packages.setuptools"]
+
+[phases.setup.apt]
+pkgs = [
+    "libgl1",
+    "libgl1-mesa-glx",
+    "libglib2.0-0",
+    "libsm6",
+    "libxext6",
+    "libxrender1",
+    "libx11-6",
+    "libxcb1",
+    "libxcb-xfixes0",
+    "libxcb-shm0",
+    "libfontconfig1",
+    "libxfixes3",
+    "libxi6"
+]
+
+[phases.install]
+cmds = ["pip install --no-cache-dir -r backend/requirements.txt"]
+
+[phases.build]
+cmds = []
+
+[start]
+cmd = "gunicorn backend.app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120"
