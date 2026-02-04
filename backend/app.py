@@ -40,7 +40,7 @@ from translators.gemini_translator import get_translator
 
 # Flask uygulaması
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
 # Maksimum dosya boyutu
 app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE
