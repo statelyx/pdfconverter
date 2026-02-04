@@ -1,0 +1,35 @@
+# PDF Komuta Merkezi - Extension Bağımlılıkları
+# Mevcut requirements.txt'e EK olarak kurulur
+
+# PDF → Markdown
+markdownify==0.11.6
+pymdown-extensions==10.7
+
+# OCR
+pytesseract==0.3.10
+Pillow==10.3.0
+
+# PDF İşleme (ek)
+pymupdf4llm==0.0.5
+ocrmypdf==15.4.0
+
+# Çeviri
+googletrans==4.0.0rc1
+translate==3.6.1
+
+# HTML → PDF
+xhtml2pdf==0.2.11
+reportlab==4.1.0
+
+# Markdown → PDF
+markdown==3.5.1
+weasyprint==60.1
+
+# LLM
+openai==1.12.0  # Opsiyonel
+anthropic==0.18.0  # Opsiyonel
+
+# Utility
+requests==2.31.0
+beautifulsoup4==4.12.3
+lxml==5.1.0

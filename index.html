@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Araçları - Dönüştür, Çevir, Birleştir</title>
+    <meta name="description"
+        content="PDF dosyalarınızı ücretsiz dönüştürün, çevirin ve düzenleyin. PDF to Word, JPG to PDF, PDF çeviri ve daha fazlası.">
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/modal.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- PDF.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <!-- jsPDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <!-- Mammoth.js for Word -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+    <!-- html2canvas -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+</head>
+
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="container">
+            <a href="/" class="logo">
+                <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                    <polyline points="10 9 9 9 8 9"></polyline>
+                </svg>
+                <span>PDFKit</span>
+            </a>
+            <nav class="nav">
+                <a href="#tools" class="nav-link">Araçlar</a>
+                <a href="#pricing" class="nav-link">Fiyatlandırma</a>
+            </nav>
+            <div class="header-actions">
+                <div class="credits-display" id="creditsDisplay" style="border-color: #ff00ff; color: #ff00ff;">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <path d="M12 6v6l4 2"></path>
+                    </svg>
+                    <span style="color: #ff00ff;">∞ ADMIN</span>
+                </div>
+                <button class="btn btn-primary" onclick="showPricingModal()">Kredi Al</button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="container">
+            <h1><span class="gradient-text">PDF Komuta Merkezi</span></h1>
+            <p class="hero-subtitle">🚀 Dosyanızı yükleyin • Format seçin • Anında dönüştürün</p>
+        </div>
+    </section>
+
+    <!-- Main Tools Section -->
+    <section class="tools-section" id="tools">
+        <div class="container">
+            <div class="tools-grid">
+                <!-- PDF Çeviri - Ana Özellik -->
+                <div class="tool-card featured" data-tool="translate">
+                    <div class="tool-icon translate">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M5 8l6 6"></path>
+                            <path d="M4 14l6-6 2-3"></path>
+                            <path d="M2 5h12"></path>
+                            <path d="M7 2h1"></path>
+                            <path d="M22 22l-5-10-5 10"></path>
+                            <path d="M14 18h6"></path>
+                        </svg>
+                    </div>
+                    <h3>PDF Çeviri</h3>
+                    <p>Format koruyarak 100+ dile çevirin</p>
+                    <span class="tool-badge">⭐ Popüler</span>
+                </div>
+
+                <!-- PDF to Word -->
+                <div class="tool-card" data-tool="pdf-to-word">
+                    <div class="tool-icon pdf-word">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                            <polyline points="14 2 14 8 20 8"></polyline>
+                            <line x1="16" y1="13" x2="8" y2="13"></line>
+                            <line x1="16" y1="17" x2="8" y2="17"></line>
+                        </svg>
+                    </div>
+                    <h3>PDF → Word</h3>
+                    <p>PDF'i düzenlenebilir Word'e dönüştür</p>
+                </div>
+
+                <!-- Word to PDF -->
+                <div class="tool-card" data-tool="word-to-pdf">
+                    <div class="tool-icon word-pdf">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path
+                                d="M4 4v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8.342a2 2 0 0 0-.602-1.43l-4.44-4.342A2 2 0 0 0 13.56 2H6a2 2 0 0 0-2 2z">
+                            </path>
+                            <path d="M9 13h6"></path>
+                            <path d="M9 17h3"></path>
+                        </svg>
+                    </div>
+                    <h3>Word → PDF</h3>
+                    <p>Word dosyalarını PDF'e dönüştür</p>
+                </div>
+
+                <!-- JPG to PDF -->
+                <div class="tool-card" data-tool="jpg-to-pdf">
+                    <div class="tool-icon img-pdf">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                            <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                            <polyline points="21 15 16 10 5 21"></polyline>
+                        </svg>
+                    </div>
+                    <h3>Görsel → PDF</h3>
+                    <p>JPG, PNG görsellerden PDF oluştur</p>
+                </div>
+
+                <!-- PDF to JPG -->
+                <div class="tool-card" data-tool="pdf-to-jpg">
+                    <div class="tool-icon pdf-img">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                            <polyline points="14 2 14 8 20 8"></polyline>
+                            <rect x="8" y="12" width="8" height="6" rx="1"></rect>
+                        </svg>
+                    </div>
+                    <h3>PDF → Görsel</h3>
+                    <p>PDF sayfalarını görsel olarak kaydet</p>
+                </div>
+
+                <!-- Merge PDF -->
+                <div class="tool-card" data-tool="merge-pdf">
+                    <div class="tool-icon merge">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="2" y="3" width="8" height="10" rx="1"></rect>
+                            <rect x="14" y="3" width="8" height="10" rx="1"></rect>
+                            <path d="M12 17v4"></path>
+                            <path d="M6 17v4h12v-4"></path>
+                        </svg>
+                    </div>
+                    <h3>PDF Birleştir</h3>
+                    <p>Birden fazla PDF'i tek dosyada birleştir</p>
+                </div>
+
+                <!-- Split PDF -->
+                <div class="tool-card" data-tool="split-pdf">
+                    <div class="tool-icon split">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="8" y="2" width="8" height="8" rx="1"></rect>
+                            <path d="M12 14v8"></path>
+                            <path d="M4 18h4v4H4z"></path>
+                            <path d="M16 18h4v4h-4z"></path>
+                            <path d="M6 14h12"></path>
+                        </svg>
+                    </div>
+                    <h3>PDF Böl</h3>
+                    <p>PDF'i sayfalara veya parçalara ayır</p>
+                </div>
+
+                <!-- Compress PDF -->
+                <div class="tool-card" data-tool="compress-pdf">
+                    <div class="tool-icon compress">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                            <polyline points="14 2 14 8 20 8"></polyline>
+                            <path d="M12 18v-6"></path>
+                            <path d="M9 15l3-3 3 3"></path>
+                        </svg>
+                    </div>
+                    <h3>PDF Sıkıştır</h3>
+                    <p>PDF boyutunu küçült</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Tool Interface Modal -->
+    <div class="modal" id="toolModal">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeModal()">&times;</button>
+
+            <!-- Step 1: Upload -->
+            <div class="tool-step" id="step1">
+                <h2 id="toolTitle">PDF Çeviri</h2>
+
+                <input type="file" id="fileInput" accept=".pdf" style="display:none;">
+
+                <label for="fileInput" class="upload-zone" id="uploadZone">
+                    <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="17 8 12 3 7 8"></polyline>
+                        <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                    <p>Dosyalarınızı sürükleyin veya <strong
+                            style="color:#00f0ff;text-decoration:underline;">tıklayın</strong></p>
+                    <span class="upload-hint" id="uploadHint">PDF</span>
+                </label>
+
+                <div class="file-list" id="fileList"></div>
+            </div>
+
+            <!-- Step 2: Options -->
+            <div class="tool-step hidden" id="step2">
+                <h2>Seçenekler</h2>
+
+                <!-- Translation Options -->
+                <div class="options-panel" id="translateOptions">
+                    <div class="option-group">
+                        <label>Kaynak Dil</label>
+                        <select id="sourceLang">
+                            <option value="auto">Otomatik Algıla</option>
+                            <option value="en">İngilizce</option>
+                            <option value="tr">Türkçe</option>
+                            <option value="de">Almanca</option>
+                            <option value="fr">Fransızca</option>
+                            <option value="es">İspanyolca</option>
+                            <option value="it">İtalyanca</option>
+                            <option value="pt">Portekizce</option>
+                            <option value="ru">Rusça</option>
+                            <option value="ar">Arapça</option>
+                            <option value="zh">Çince</option>
+                            <option value="ja">Japonca</option>
+                            <option value="ko">Korece</option>
+                        </select>
+                    </div>
+                    <div class="option-group">
+                        <label>Hedef Dil</label>
+                        <select id="targetLang">
+                            <option value="tr">Türkçe</option>
+                            <option value="en">İngilizce</option>
+                            <option value="de">Almanca</option>
+                            <option value="fr">Fransızca</option>
+                            <option value="es">İspanyolca</option>
+                            <option value="it">İtalyanca</option>
+                            <option value="pt">Portekizce</option>
+                            <option value="ru">Rusça</option>
+                            <option value="ar">Arapça</option>
+                            <option value="zh">Çince</option>
+                            <option value="ja">Japonca</option>
+                            <option value="ko">Korece</option>
+                            <option value="nl">Hollandaca</option>
+                            <option value="pl">Lehçe</option>
+                            <option value="sv">İsveççe</option>
+                            <option value="da">Danca</option>
+                            <option value="no">Norveççe</option>
+                            <option value="fi">Fince</option>
+                            <option value="el">Yunanca</option>
+                            <option value="cs">Çekçe</option>
+                            <option value="hu">Macarca</option>
+                            <option value="ro">Romence</option>
+                            <option value="bg">Bulgarca</option>
+                            <option value="uk">Ukraynaca</option>
+                            <option value="hi">Hintçe</option>
+                            <option value="th">Tayca</option>
+                            <option value="vi">Vietnamca</option>
+                            <option value="id">Endonezce</option>
+                            <option value="ms">Malayca</option>
+                        </select>
+                    </div>
+                    <div class="option-group">
+                        <label>Çıktı Formatı</label>
+                        <select id="translateFormat">
+                            <option value="html">HTML (Türkçe Destekli - Önerilen)</option>
+                            <option value="pdf">PDF</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Output Format Options -->
+                <div class="options-panel hidden" id="formatOptions">
+                    <div class="option-group">
+                        <label>Çıktı Formatı</label>
+                        <select id="outputFormat">
+                            <option value="pdf">PDF</option>
+                            <option value="jpg">JPG Görsel</option>
+                            <option value="png">PNG Görsel</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Image to PDF Options -->
+                <div class="options-panel hidden" id="imageOptions">
+                    <div class="option-group">
+                        <label>Sayfa Boyutu</label>
+                        <select id="pageSize">
+                            <option value="a4">A4</option>
+                            <option value="letter">Letter</option>
+                            <option value="fit">Görsele Sığdır</option>
+                        </select>
+                    </div>
+                    <div class="option-group">
+                        <label>Yönlendirme</label>
+                        <select id="orientation">
+                            <option value="portrait">Dikey</option>
+                            <option value="landscape">Yatay</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Split Options -->
+                <div class="options-panel hidden" id="splitOptions">
+                    <div class="option-group">
+                        <label>Bölme Yöntemi</label>
+                        <select id="splitMethod">
+                            <option value="all">Her Sayfayı Ayrı</option>
+                            <option value="range">Sayfa Aralığı</option>
+                        </select>
+                    </div>
+                    <div class="option-group" id="rangeGroup" style="display:none">
+                        <label>Sayfa Aralığı (örn: 1-3, 5, 7-9)</label>
+                        <input type="text" id="pageRange" placeholder="1-3, 5, 7-9">
+                    </div>
+                </div>
+
+                <div class="step-actions">
+                    <button class="btn btn-secondary" onclick="goToStep(1)">Geri</button>
+                    <button class="btn btn-primary" onclick="processFiles()">
+                        <span id="processBtn">Dönüştür</span>
+                        <span class="btn-cost" id="btnCost">1 Kredi</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Step 3: Processing -->
+            <div class="tool-step hidden" id="step3">
+                <div class="processing-animation">
+                    <div class="processing-spinner"></div>
+                    <h2>İşleniyor...</h2>
+                    <p id="processingStatus">Dosya hazırlanıyor</p>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 4: Complete -->
+            <div class="tool-step hidden" id="step4">
+                <div class="complete-animation">
+                    <svg class="checkmark" viewBox="0 0 52 52">
+                        <circle class="checkmark-circle" cx="26" cy="26" r="25" fill="none" />
+                        <path class="checkmark-check" fill="none" d="M14.1 27.2l7.1 7.2 16.7-16.8" />
+                    </svg>
+                    <h2>Tamamlandı!</h2>
+                    <p>Dosyanız hazır</p>
+                </div>
+                <div class="download-list" id="downloadList"></div>
+                <div class="step-actions">
+                    <button class="btn btn-secondary" onclick="resetTool()">Yeni İşlem</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pricing Modal -->
+    <div class="modal" id="pricingModal">
+        <div class="modal-content pricing-modal">
+            <button class="modal-close" onclick="closePricingModal()">&times;</button>
+            <h2>Kredi Satın Al</h2>
+            <p class="pricing-subtitle">Tüm araçları kullanmak için kredi satın alın</p>
+
+            <div class="pricing-grid">
+                <div class="pricing-card">
+                    <h3>Başlangıç</h3>
+                    <div class="pricing-amount">
+                        <span class="currency">₺</span>
+                        <span class="price">29</span>
+                    </div>
+                    <ul class="pricing-features">
+                        <li>10 Kredi</li>
+                        <li>Tüm araçlara erişim</li>
+                        <li>7 gün geçerli</li>
+                    </ul>
+                    <button class="btn btn-secondary" onclick="buyCredits(10)">Satın Al</button>
+                </div>
+
+                <div class="pricing-card popular">
+                    <span class="popular-badge">En Popüler</span>
+                    <h3>Standart</h3>
+                    <div class="pricing-amount">
+                        <span class="currency">₺</span>
+                        <span class="price">69</span>
+                    </div>
+                    <ul class="pricing-features">
+                        <li>30 Kredi</li>
+                        <li>Tüm araçlara erişim</li>
+                        <li>30 gün geçerli</li>
+                        <li>Öncelikli işlem</li>
+                    </ul>
+                    <button class="btn btn-primary" onclick="buyCredits(30)">Satın Al</button>
+                </div>
+
+                <div class="pricing-card">
+                    <h3>Premium</h3>
+                    <div class="pricing-amount">
+                        <span class="currency">₺</span>
+                        <span class="price">149</span>
+                    </div>
+                    <ul class="pricing-features">
+                        <li>100 Kredi</li>
+                        <li>Tüm araçlara erişim</li>
+                        <li>90 gün geçerli</li>
+                        <li>Öncelikli işlem</li>
+                        <li>E-posta desteği</li>
+                    </ul>
+                    <button class="btn btn-secondary" onclick="buyCredits(100)">Satın Al</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- API Key Modal -->
+    <div class="modal" id="apiKeyModal">
+        <div class="modal-content api-modal">
+            <button class="modal-close" onclick="closeApiKeyModal()">&times;</button>
+            <h2>🔑 API Anahtarı Gerekli</h2>
+            <p>PDF çeviri özelliğini kullanmak için Google AI Studio API anahtarınızı girin.</p>
+            <div class="api-instructions">
+                <ol>
+                    <li><a href="https://aistudio.google.com/app/apikey" target="_blank">Google AI Studio</a>'ya gidin
+                    </li>
+                    <li>"Create API Key" butonuna tıklayın</li>
+                    <li>Oluşturulan anahtarı kopyalayın</li>
+                    <li>Aşağıya yapıştırın</li>
+                </ol>
+            </div>
+            <input type="password" id="apiKeyInput" placeholder="API Anahtarınız (sk-...)" class="api-input">
+            <button class="btn btn-primary" onclick="saveApiKey()">Kaydet</button>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div class="toast" id="toast">
+        <span class="toast-message"></span>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>&copy; 2026 PDFKit. Tüm hakları saklıdır.</p>
+        </div>
+    </footer>
+
+    <script src="js/app.js"></script>
+    <script src="js/processing.js"></script>
+    <script src="js/converters.js"></script>
+    <script src="js/modals.js"></script>
+</body>
+
+</html>
