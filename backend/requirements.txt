@@ -9,6 +9,7 @@ gunicorn
 # PDF İşleme
 PyMuPDF
 pdf2docx
+reportlab
 Pillow
 python-docx
 
