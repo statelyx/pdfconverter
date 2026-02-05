@@ -269,22 +269,35 @@ class SimplePDFTranslator:
 
 
 # Converter factory
-def create_converter(converter_type: str = "hybrid") -> PDFToPDFConverter:
+def create_converter(converter_type: str = "layout"):
     """
     Converter oluştur
 
     Args:
-        converter_type: "hybrid" veya "simple"
+        converter_type: 
+            - "layout" (varsayılan): Layout-koruyucu çevirici - PDF yapısı korunur
+            - "hybrid": Hibrit çevirici - Görsel arka plan + metin katmanı
+            - "simple": Basit çevirici - Sadece metin
 
     Returns:
         Converter instance
     """
-    if converter_type == "simple":
+    if converter_type == "layout":
+        # Layout-koruyucu çevirici - EN İYİ SONUÇ
+        from converters.layout_translator import LayoutPreservingTranslator
+        return LayoutPreservingTranslator()
+    elif converter_type == "simple":
         return SimplePDFTranslator()
-    return PDFToPDFConverter()
+    elif converter_type == "hybrid":
+        return PDFToPDFConverter()
+    else:
+        # Varsayılan: Layout-koruyucu
+        from converters.layout_translator import LayoutPreservingTranslator
+        return LayoutPreservingTranslator()
 
 
 # Test için
 if __name__ == "__main__":
     # Test kodu
     pass
+

@@ -55,7 +55,9 @@ class FallbackTranslator:
         """Translator başlat"""
         self.hf_token = os.environ.get("HF_TOKEN", "")
         self.libre_url = os.environ.get("LIBRETRANSLATE_URL", "")
+        self.provider = os.environ.get("TRANSLATOR_PROVIDER", "hf")
         self._cache = {}
+        self._hf_translator = None
         
         # Hangi provider aktif?
         self.active_provider = self._detect_provider()
@@ -63,12 +65,26 @@ class FallbackTranslator:
 
     def _detect_provider(self) -> str:
         """Aktif provider'ı tespit et"""
+        # Manuel seçim varsa kullan
+        if self.provider == "libre" and self.libre_url:
+            return "libretranslate"
+        elif self.provider == "hf" and self.hf_token:
+            return "huggingface"
+        
+        # Otomatik tespit
         if self.hf_token:
             return "huggingface"
         elif self.libre_url:
             return "libretranslate"
         else:
             return "passthrough"
+
+    def _get_hf_translator(self):
+        """Lazy HF translator al"""
+        if self._hf_translator is None:
+            from translators.hf_translator import HuggingFaceTranslator
+            self._hf_translator = HuggingFaceTranslator(self.hf_token)
+        return self._hf_translator
 
     def translate(self, text: str, target_lang: str = "tr", source_lang: str = "auto",
                  doc_type: str = None, preserve_format: bool = True) -> TranslationResult:
@@ -139,41 +155,14 @@ class FallbackTranslator:
             )
 
     def _translate_hf(self, text: str, target_lang: str, source_lang: str) -> str:
-        """Hugging Face ile çeviri"""
-        # Helsinki-NLP OPUS modeli kullan (en popüler ve ücretsiz)
-        # Model formatı: Helsinki-NLP/opus-mt-{src}-{tgt}
+        """Hugging Face ile çeviri - Profesyonel HF Translator kullan"""
+        hf_translator = self._get_hf_translator()
+        result = hf_translator.translate(text, target_lang, source_lang)
         
-        # Dil kodlarını düzelt
-        src = "en" if source_lang == "auto" else source_lang
-        tgt = target_lang
-        
-        # Model seç
-        if src == "en" and tgt == "tr":
-            model = "Helsinki-NLP/opus-mt-en-tr"
-        elif src == "tr" and tgt == "en":
-            model = "Helsinki-NLP/opus-mt-tr-en"
-        elif src == "en" and tgt == "de":
-            model = "Helsinki-NLP/opus-mt-en-de"
-        elif src == "de" and tgt == "en":
-            model = "Helsinki-NLP/opus-mt-de-en"
+        if result.success:
+            return result.text
         else:
-            # Genel çoklu dil modeli
-            model = "facebook/nllb-200-distilled-600M"
-        
-        api_url = f"https://api-inference.huggingface.co/models/{model}"
-        headers = {"Authorization": f"Bearer {self.hf_token}"}
-        
-        payload = {"inputs": text}
-        
-        response = requests.post(api_url, headers=headers, json=payload, timeout=30)
-        response.raise_for_status()
-        
-        result = response.json()
-        
-        if isinstance(result, list) and len(result) > 0:
-            return result[0].get("translation_text", text)
-        
-        return text
+            raise Exception(result.error or "HF çeviri hatası")
 
     def _translate_libre(self, text: str, target_lang: str, source_lang: str) -> str:
         """LibreTranslate ile çeviri"""

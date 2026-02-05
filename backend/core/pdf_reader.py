@@ -200,28 +200,46 @@ class PDFReader:
             List[ImageBlock]: Görsel blokları listesi
         """
         page = self.get_page(page_num)
-        blocks = page.get_text("dict")["blocks"]
         images = []
 
-        for block in blocks:
-            if block["type"] == 1:  # Görsel bloğu
-                bbox = block["bbox"]
-
+        try:
+            # PyMuPDF doğru API: get_images() ve extract_image()
+            image_list = page.get_images(full=True)
+            
+            for img_index, img_info in enumerate(image_list):
+                xref = img_info[0]  # Görsel referans numarası
+                
                 try:
-                    # Görsel verisini çıkar
-                    img = page.get_image(block["image"])
-                    image_data = img["image"]
-
+                    # Görseli çıkar
+                    base_image = self.doc.extract_image(xref)
+                    image_data = base_image["image"]
+                    
+                    # Görsel boyutlarını al
+                    width = base_image.get("width", 0)
+                    height = base_image.get("height", 0)
+                    
+                    # Görsel bbox'unu hesapla (sayfa üzerindeki konumu)
+                    # Not: get_images() tam bbox vermez, tahmini kullanıyoruz
+                    image_rects = page.get_image_rects(xref)
+                    if image_rects:
+                        bbox = image_rects[0]  # İlk rect'i al
+                    else:
+                        # Varsayılan bbox
+                        bbox = (0, 0, width, height)
+                    
                     images.append(ImageBlock(
                         bbox=bbox,
                         image_data=image_data,
-                        width=img.get("width", 0),
-                        height=img.get("height", 0),
-                        transform=block.get("transform")
+                        width=width,
+                        height=height,
+                        transform=None
                     ))
                 except Exception as e:
-                    print(f"⚠️ Görsel çıkarılamadı: {e}")
+                    print(f"⚠️ Görsel #{img_index} çıkarılamadı: {e}")
                     continue
+                    
+        except Exception as e:
+            print(f"⚠️ Sayfa görselleri alınamadı: {e}")
 
         return images
 
