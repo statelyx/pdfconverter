@@ -141,11 +141,26 @@ class HuggingFaceProvider:
         try:
             response = requests.post(api_url, headers=self._get_headers(), json=payload, timeout=self.timeout)
             
+            # Boş yanıt kontrolü
+            if not response.text or len(response.text.strip()) == 0:
+                raise Exception("Boş API yanıtı")
+            
+            # HTML yanıt kontrolü (hata sayfası)
+            if response.text.strip().startswith("<!") or response.text.strip().startswith("<html"):
+                raise Exception("API HTML hata sayfası döndürdü")
+            
             if response.status_code == 503:
-                raise Exception("Model yükleniyor, lütfen bekleyin...")
+                try:
+                    data = response.json()
+                    raise Exception(f"Model yükleniyor: {data.get('error', 'Bekleyin')}")
+                except:
+                    raise Exception("Model yükleniyor, lütfen bekleyin...")
             
             if response.status_code != 200:
-                error_data = response.json() if response.text else {}
+                try:
+                    error_data = response.json()
+                except:
+                    error_data = {"raw": response.text[:200]}
                 raise Exception(f"API Hatası {response.status_code}: {error_data}")
             
             result = response.json()
@@ -164,6 +179,12 @@ class HuggingFaceProvider:
                 success=True, provider=self.name, model=model
             )
             
+        except requests.exceptions.JSONDecodeError as e:
+            return TranslationResult(
+                text=text, source_lang=source_lang, target_lang=target_lang,
+                success=False, error=f"JSON parse hatası: {response.text[:100] if response else 'N/A'}", 
+                provider=self.name, model=model
+            )
         except Exception as e:
             return TranslationResult(
                 text=text, source_lang=source_lang, target_lang=target_lang,
@@ -361,8 +382,9 @@ class MultiProviderTranslator:
     
     def _init_providers(self) -> List:
         """Provider'ları öncelik sırasına göre başlat"""
+        # MyMemory şu an çalışıyor, onu birincil yapalım
         provider_order = self.config.get("providers", [
-            "huggingface", "mymemory", "lingva", "libretranslate"
+            "mymemory", "huggingface", "lingva", "libretranslate"
         ])
         
         provider_map = {
