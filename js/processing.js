@@ -69,7 +69,7 @@ function updateProgress(p) {
     var status = document.getElementById('processingStatus');
     if (status) {
         if (p < 20) status.textContent = 'Dosya yükleniyor...';
-        else if (p < 40) status.textContent = 'Backend işliyor...';
+        else if (p < 40) status.textContent = 'Dönüştürme başlatıldı...';
         else if (p < 70) status.textContent = 'Çeviri yapılıyor...';
         else if (p < 90) status.textContent = 'Çıktı hazırlanıyor...';
         else status.textContent = 'Tamamlanıyor...';
