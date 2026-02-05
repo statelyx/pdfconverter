@@ -224,8 +224,9 @@ class HFTranslatorV2:
         )
 
     def _call_hf_api(self, text: str, model: str, source_lang: str, target_lang: str) -> str:
-        """Call HF Inference API"""
-        api_url = f"https://api-inference.huggingface.co/models/{model}"
+        """Call HF Inference API - Updated to use router.huggingface.co"""
+        # YENİ ENDPOINT - api-inference artık desteklenmiyor
+        api_url = f"https://router.huggingface.co/hf-inference/models/{model}"
         
         # NLLB requires different payload
         if "nllb" in model.lower():

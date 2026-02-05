@@ -307,17 +307,29 @@ def get_translator():
     """
     Singleton translator örneği al
     
-    VARSAYILAN: HF Translator v2 (Gemini tamamen devre dışı)
+    VARSAYILAN: Multi-Provider Translator (Failover destekli)
+    
+    Provider Önceliği:
+    1. Hugging Face (router.huggingface.co)
+    2. MyMemory (ücretsiz)
+    3. Lingva (Google proxy)
+    4. LibreTranslate (self-hosted)
     
     HF Token Priority: WRITE -> READ -> API_KEY
     """
     global _translator_instance
     
     if _translator_instance is None:
-        # GEMINI DEVRE DIŞI - Doğrudan HF Translator kullan
-        print("🤗 HF Translator v2 yükleniyor (Gemini DEVRE DIŞI)")
-        from translators.hf_translator import get_translator as get_hf
-        _translator_instance = get_hf()
+        # Multi-Provider Translator kullan - Failover destekli
+        print("🌐 Multi-Provider Translator yükleniyor...")
+        try:
+            from translators.multi_translator import get_translator as get_multi
+            _translator_instance = get_multi()
+        except ImportError:
+            # Fallback: HF Translator
+            print("⚠️ Multi-translator yüklenemedi, HF Translator kullanılıyor")
+            from translators.hf_translator import get_translator as get_hf
+            _translator_instance = get_hf()
     
     return _translator_instance
 

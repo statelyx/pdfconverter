@@ -17,7 +17,11 @@ import fitz  # PyMuPDF
 from typing import List, Dict, Tuple, Optional, Callable
 from dataclasses import dataclass
 
-from translators.hf_translator import get_translator, TranslationResult
+# Multi-Provider Translator kullan (failover destekli)
+try:
+    from translators.multi_translator import get_translator, TranslationResult
+except ImportError:
+    from translators.hf_translator import get_translator, TranslationResult
 
 
 @dataclass
