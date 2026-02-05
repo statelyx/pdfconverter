@@ -183,31 +183,44 @@ class SpanBasedTranslator:
         
         # Batch çeviri yap - tek seferde tüm metinleri çevir
         print(f"   📦 Batch çeviri: {len(texts_to_translate)} metin")
-        
+
         translations = {}
-        
-        # 10'lu gruplar halinde çevir (rate limiting için)
+
+        # Paralel çeviri - 3 workers aynı anda
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
         batch_size = 10
+        max_workers = 3  # Aynı anda 3 request
+
         for batch_start in range(0, len(texts_to_translate), batch_size):
             batch_end = min(batch_start + batch_size, len(texts_to_translate))
             batch_texts = texts_to_translate[batch_start:batch_end]
             batch_indices = line_indices[batch_start:batch_end]
-            
-            for j, text in enumerate(batch_texts):
-                idx = batch_indices[j]
-                try:
-                    result = self.translator.translate(
+
+            # Paralel çeviri
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_idx = {}
+
+                for j, text in enumerate(batch_texts):
+                    idx = batch_indices[j]
+                    future_to_idx[executor.submit(
+                        self.translator.translate,
                         text,
                         target_lang=target_lang,
                         source_lang=source_lang
-                    )
-                    
-                    if result.success and result.text != text:
-                        translations[idx] = result.text
-                        print(f"   ✓ Line {idx+1}: {text[:25]}... → {result.text[:25]}...")
-                    
-                except Exception as e:
-                    print(f"   ⚠️ Line {idx+1} error: {e}")
+                    )] = idx
+
+                for future in as_completed(future_to_idx):
+                    idx = future_to_idx[future]
+                    try:
+                        result = future.result(timeout=10)  # 10sn max per request
+
+                        if result.success and result.text != text:
+                            translations[idx] = result.text
+                            print(f"   ✓ Line {idx+1}: {result.text[:30]}...")
+
+                    except Exception as e:
+                        print(f"   ⚠️ Line {idx+1} timeout/fallback: {e[:50]}...")
         
         # Render all translations
         print(f"   🎨 Rendering {len(translations)} translations...")

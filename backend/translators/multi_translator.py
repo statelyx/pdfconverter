@@ -200,8 +200,7 @@ class MyMemoryProvider:
     """
     MyMemory Translation API - Ücretsiz
     Günlük 5000 kelime limiti (anonim)
-    API key ile 30000 kelime/gün
-    Hızlı ve güvenilir versiyon
+    Hızlı ve güvenilir versiyon - Paralel çeviri desteği
     """
 
     name = "mymemory"
@@ -209,7 +208,7 @@ class MyMemoryProvider:
     def __init__(self, email: str = None):
         self.email = email or os.environ.get("MYMEMORY_EMAIL", "")
         self.base_url = "https://api.mymemory.translated.net/get"
-        self.timeout = 5  # 5 saniye - hızlı çeviri
+        self.timeout = 3  # 3 saniye - ultra hızlı
         self.available = True
 
     def translate(self, text: str, target_lang: str, source_lang: str = "auto") -> TranslationResult:
@@ -221,7 +220,7 @@ class MyMemoryProvider:
             params["de"] = self.email
 
         try:
-            # Doğrudan requests.get - session yok
+            # Ultra hızlı request - timeout 3s
             response = requests.get(self.base_url, params=params, timeout=self.timeout, verify=False)
 
             if response.status_code != 200:
@@ -240,8 +239,8 @@ class MyMemoryProvider:
                 success=True, provider=self.name, confidence=match_quality
             )
 
-        except Exception as e:
-            # Hata durumunda orijinal metni dön
+        except Exception:
+            # Hata durumunda orijinal metni dön - timeout olmasın
             return TranslationResult(
                 text=text, source_lang=source_lang, target_lang=target_lang,
                 success=True, provider=self.name + "-fallback", confidence=0
