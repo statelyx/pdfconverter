@@ -16,5 +16,5 @@ cmds = ["pip install --no-cache-dir -r backend/requirements.txt"]
 cmds = []
 
 [start]
-# Timeout artırıldı: 300s, graceful-timeout: 60s
-cmd = "gunicorn backend.app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 300 --graceful-timeout 60"
+# Timeout artırıldı: 300s, graceful-timeout: 120s, gevent worker
+cmd = "gunicorn backend.app:app --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 600 --graceful-timeout 120"

@@ -105,6 +105,20 @@ def handle_request(endpoint_func):
         return error_response(f"Islem sirasinda hata olustu: {str(e)}", 500)
 
 
+# Global error handler - CORS header'ları her zaman gönderilsin
+@app.errorhandler(500)
+def handle_500(error):
+    response = jsonify({"error": "Sunucu hatası oluştu"})
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    return response, 500
+
+@app.errorhandler(Exception)
+def handle_exception(error):
+    response = jsonify({"error": str(error)})
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    return response, 500
+
+
 # ============================================================================
 # SYSTEM ENDPOINTS
 # ============================================================================
