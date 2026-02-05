@@ -19,6 +19,10 @@ import requests
 from typing import Optional, List, Dict, Callable
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import urllib3
+
+# SSL warnings'ı gizle (Railway SSL certificate issues için)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 @dataclass
@@ -197,48 +201,72 @@ class MyMemoryProvider:
     MyMemory Translation API - Ücretsiz
     Günlük 5000 kelime limiti (anonim)
     API key ile 30000 kelime/gün
+    SSL ve retry optimizasyonlu
     """
-    
+
     name = "mymemory"
-    
+
     def __init__(self, email: str = None):
         self.email = email or os.environ.get("MYMEMORY_EMAIL", "")
         self.base_url = "https://api.mymemory.translated.net/get"
-        self.timeout = 30  # Railway timeout'u için yeterli
-        self.available = True  # Her zaman kullanılabilir
-        
+        self.timeout = 30
+        self.max_retries = 3
+        self.available = True
+
+        # Session oluştur - SSL sorunları için
+        self.session = requests.Session()
+        # SSL verify'i kapat (Railway'de SSL certificate sorunları için)
+        self.session.verify = False
+        # Warning'leri gizle
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
     def translate(self, text: str, target_lang: str, source_lang: str = "auto") -> TranslationResult:
         src = "en" if source_lang == "auto" else source_lang
         langpair = f"{src}|{target_lang}"
-        
+
         params = {"q": text, "langpair": langpair}
         if self.email:
             params["de"] = self.email
-        
-        try:
-            response = requests.get(self.base_url, params=params, timeout=self.timeout)
-            
-            if response.status_code != 200:
-                raise Exception(f"HTTP {response.status_code}")
-            
-            data = response.json()
-            
-            if data.get("responseStatus") != 200:
-                raise Exception(data.get("responseDetails", "Bilinmeyen hata"))
-            
-            translated = data.get("responseData", {}).get("translatedText", text)
-            match_quality = data.get("responseData", {}).get("match", 0)
-            
-            return TranslationResult(
-                text=translated, source_lang=src, target_lang=target_lang,
-                success=True, provider=self.name, confidence=match_quality
-            )
-            
-        except Exception as e:
-            return TranslationResult(
-                text=text, source_lang=source_lang, target_lang=target_lang,
-                success=False, error=str(e), provider=self.name
-            )
+
+        # Retry mekanizması
+        last_error = None
+        for attempt in range(self.max_retries):
+            try:
+                response = self.session.get(self.base_url, params=params, timeout=self.timeout)
+
+                if response.status_code != 200:
+                    raise Exception(f"HTTP {response.status_code}")
+
+                data = response.json()
+
+                if data.get("responseStatus") != 200:
+                    raise Exception(data.get("responseDetails", "Bilinmeyen hata"))
+
+                translated = data.get("responseData", {}).get("translatedText", text)
+                match_quality = data.get("responseData", {}).get("match", 0)
+
+                return TranslationResult(
+                    text=translated, source_lang=src, target_lang=target_lang,
+                    success=True, provider=self.name, confidence=match_quality
+                )
+
+            except (requests.exceptions.SSLError,
+                    requests.exceptions.ConnectionError,
+                    requests.exceptions.Timeout) as e:
+                last_error = str(e)
+                if attempt < self.max_retries - 1:
+                    time.sleep(0.5 * (attempt + 1))  # Exponential backoff
+                    continue
+            except Exception as e:
+                last_error = str(e)
+                break
+
+        return TranslationResult(
+            text=text, source_lang=source_lang, target_lang=target_lang,
+            success=False, error=f"MyMemory hatası (retry: {self.max_retries}): {last_error}",
+            provider=self.name
+        )
 
 
 class LingvaProvider:
