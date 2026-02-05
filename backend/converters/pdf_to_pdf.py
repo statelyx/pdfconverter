@@ -18,7 +18,7 @@ from PIL import Image
 from core.pdf_reader import PDFReader, TextBlock
 from core.pdf_writer import HybridPDFWriter
 from core.font_manager import FontManager
-from translators.gemini_translator import get_translator, TranslationResult
+from translators.multi_translator import get_translator, TranslationResult
 from config import PDF_DPI
 
 

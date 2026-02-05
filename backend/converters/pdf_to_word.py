@@ -18,7 +18,7 @@ from docx.shared import Pt, Inches, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 from core.pdf_reader import PDFReader
-from translators.gemini_translator import get_translator
+from translators.multi_translator import get_translator
 from core.font_manager import FontManager
 
 # pdf2docx LAZY IMPORT - opencv bağımlılığı nedeniyle

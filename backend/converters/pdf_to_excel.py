@@ -15,7 +15,7 @@ from openpyxl.styles import Font, Alignment, Border, Side
 from openpyxl.utils.dataframe import dataframe_to_rows
 
 from core.pdf_reader import PDFReader
-from translators.gemini_translator import get_translator
+from translators.multi_translator import get_translator
 
 
 class PDFToExcelConverter:

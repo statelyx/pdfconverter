@@ -14,7 +14,7 @@ import io
 import fitz  # PyMuPDF
 from typing import Optional, Callable, List, Dict, Tuple
 
-from translators.gemini_translator import get_translator
+from translators.multi_translator import get_translator
 
 
 class LayoutPreservingTranslator:
