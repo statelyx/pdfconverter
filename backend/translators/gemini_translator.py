@@ -303,11 +303,30 @@ class GeminiTranslator:
 _translator_instance = None
 
 
-def get_translator() -> GeminiTranslator:
-    """Singleton translator örneği al"""
+def get_translator():
+    """
+    Singleton translator örneği al
+    
+    ENABLE_GEMINI=true ise Gemini kullanır, değilse Fallback translator kullanır.
+    Varsayılan: Fallback (Gemini devre dışı)
+    """
     global _translator_instance
+    
     if _translator_instance is None:
-        _translator_instance = GeminiTranslator()
+        # Gemini aktif mi kontrol et
+        import os
+        enable_gemini = os.environ.get("ENABLE_GEMINI", "false").lower() == "true"
+        gemini_key = os.environ.get("GEMINI_API_KEY", "")
+        
+        if enable_gemini and gemini_key:
+            print("🤖 Gemini Translator aktif")
+            _translator_instance = GeminiTranslator()
+        else:
+            # Fallback translator kullan
+            print("🌐 Fallback Translator aktif (Gemini devre dışı)")
+            from translators.fallback_translator import get_fallback_translator
+            _translator_instance = get_fallback_translator()
+    
     return _translator_instance
 
 

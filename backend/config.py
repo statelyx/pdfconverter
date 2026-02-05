@@ -16,6 +16,18 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # API Keys - ENV'den al
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
+# Gemini Ayarları - Varsayılan: KAPALI
+ENABLE_GEMINI = os.environ.get("ENABLE_GEMINI", "false").lower() == "true"
+
+# Hugging Face Token - Ücretsiz çeviri için
+HF_TOKEN = os.environ.get("HF_TOKEN", "")
+
+# LibreTranslate URL - Self-host için
+LIBRETRANSLATE_URL = os.environ.get("LIBRETRANSLATE_URL", "")
+
+# Çeviri Provider Seçimi: hf, libre, argos, gemini
+TRANSLATOR_PROVIDER = os.environ.get("TRANSLATOR_PROVIDER", "hf")
+
 # Font Yolları
 FONT_DIR = os.path.join(BASE_DIR, "fonts")
 FONTS = {
