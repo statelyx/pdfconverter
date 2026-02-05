@@ -1,12 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-Hugging Face Translator - Ücretsiz AI Çeviri Modülü
-Hugging Face Inference API ile profesyonel çeviri
+Hugging Face Translator v2 - Professional Translation Module
+Uses HF Inference API with proper token priority
 
-Desteklenen modeller:
-- Helsinki-NLP/opus-mt-* (hızlı, dil çiftleri için)
-- facebook/nllb-200-distilled-600M (çoklu dil)
-- facebook/mbart-large-50-many-to-many-mmt (alternatif)
+Token Priority: WRITE -> READ -> API_KEY
+Models: Helsinki-NLP/opus-mt-* for fast translation
 """
 
 import os
@@ -15,24 +13,10 @@ import requests
 from typing import Optional, List, Dict
 from dataclasses import dataclass
 
-# Config'den dil isimlerini al
-try:
-    from config import LANGUAGE_NAMES, HF_TOKEN as CONFIG_HF_TOKEN
-except ImportError:
-    LANGUAGE_NAMES = {
-        "auto": "Otomatik",
-        "tr": "Türkçe",
-        "en": "İngilizce",
-        "de": "Almanca",
-        "fr": "Fransızca",
-        "es": "İspanyolca"
-    }
-    CONFIG_HF_TOKEN = ""
-
 
 @dataclass
 class TranslationResult:
-    """Çeviri sonucu"""
+    """Translation result"""
     text: str
     source_lang: str
     target_lang: str
@@ -42,10 +26,10 @@ class TranslationResult:
     model: str = ""
 
     def __str__(self):
-        return self.text if self.success else f"Hata: {self.error}"
+        return self.text if self.success else f"Error: {self.error}"
 
 
-# OPUS model haritası - en iyi performans için
+# OPUS model map - best performance
 OPUS_MODELS = {
     ("en", "tr"): "Helsinki-NLP/opus-mt-en-tr",
     ("tr", "en"): "Helsinki-NLP/opus-mt-tr-en",
@@ -55,114 +39,104 @@ OPUS_MODELS = {
     ("fr", "en"): "Helsinki-NLP/opus-mt-fr-en",
     ("en", "es"): "Helsinki-NLP/opus-mt-en-es",
     ("es", "en"): "Helsinki-NLP/opus-mt-es-en",
-    ("en", "it"): "Helsinki-NLP/opus-mt-en-it",
-    ("it", "en"): "Helsinki-NLP/opus-mt-it-en",
-    ("en", "ru"): "Helsinki-NLP/opus-mt-en-ru",
-    ("ru", "en"): "Helsinki-NLP/opus-mt-ru-en",
-    ("en", "ar"): "Helsinki-NLP/opus-mt-en-ar",
-    ("ar", "en"): "Helsinki-NLP/opus-mt-ar-en",
-    ("en", "zh"): "Helsinki-NLP/opus-mt-en-zh",
-    ("zh", "en"): "Helsinki-NLP/opus-mt-zh-en",
+    ("de", "tr"): "Helsinki-NLP/opus-mt-de-tr",
+    ("tr", "de"): "Helsinki-NLP/opus-mt-tr-de",
 }
 
-# NLLB dil kodları (farklı format kullanıyor)
+# NLLB language codes
 NLLB_LANG_CODES = {
     "en": "eng_Latn",
     "tr": "tur_Latn",
     "de": "deu_Latn",
     "fr": "fra_Latn",
     "es": "spa_Latn",
-    "it": "ita_Latn",
-    "ru": "rus_Cyrl",
-    "ar": "arb_Arab",
-    "zh": "zho_Hans",
-    "ja": "jpn_Jpan",
-    "ko": "kor_Hang",
 }
 
 
-class HuggingFaceTranslator:
+def get_hf_token() -> str:
     """
-    Hugging Face Inference API ile çeviri
+    Get HF token with correct priority:
+    WRITE -> READ -> API_KEY
+    """
+    token = (
+        os.environ.get("HUGGINGFACE_WRITE_API_KEY", "") or
+        os.environ.get("HUGGINGFACE_READ_API_KEY", "") or
+        os.environ.get("HUGGINGFACE_API_KEY", "") or
+        os.environ.get("HF_TOKEN", "")
+    )
+    return token
+
+
+class HFTranslatorV2:
+    """
+    Hugging Face Translator v2
     
-    Özellikler:
-    - OPUS modelleri ile hızlı çeviri (dil çiftleri için)
-    - NLLB ile çoklu dil desteği (fallback)
-    - Otomatik model seçimi
-    - Retry mekanizması
-    - Cache desteği
+    Features:
+    - Correct token priority (WRITE -> READ -> API_KEY)
+    - OPUS models for fast translation
+    - NLLB fallback for unsupported pairs
+    - Retry mechanism with exponential backoff
+    - Cache support
     """
 
     def __init__(self, token: str = None):
-        """
-        HF Translator başlat
-        
-        Args:
-            token: Hugging Face API token (opsiyonel, ENV'den de alınabilir)
-        # Birden fazla ENV değişken adını destekle
-        self.token = (
-            token or 
-            os.environ.get("HF_TOKEN", "") or 
-            os.environ.get("HUGGINGFACE_API_KEY", "") or
-            os.environ.get("HUGGINGFACE_READ_API_KEY", "") or
-            CONFIG_HF_TOKEN
-        )
+        """Initialize translator"""
+        self.token = token or get_hf_token()
         self._cache = {}
-        self._model_status = {}  # Model kullanılabilirlik durumu
+        self._retry_count = 3
+        self._retry_delay = 2
+        
+        # Custom model overrides from ENV
+        self.model_en_tr = os.environ.get("HF_MODEL_EN_TR", "Helsinki-NLP/opus-mt-en-tr")
+        self.model_tr_en = os.environ.get("HF_MODEL_TR_EN", "Helsinki-NLP/opus-mt-tr-en")
         
         if self.token:
-            print(f"🤗 Hugging Face Translator başlatıldı (token: ***{self.token[-4:]})")
+            token_preview = f"***{self.token[-4:]}" if len(self.token) > 4 else "***"
+            print(f"🤗 HF Translator v2 initialized (token: {token_preview})")
         else:
-            print("⚠️ HF_TOKEN bulunamadı - çeviri passthrough modunda çalışacak")
+            print("⚠️ NO HF TOKEN FOUND - Translation will fail!")
 
     def _get_headers(self) -> Dict:
-        """API headers"""
-        headers = {"Content-Type": "application/json"}
-        if self.token:
-            headers["Authorization"] = f"Bearer {self.token}"
-        return headers
+        """Get API headers"""
+        if not self.token:
+            return {"Content-Type": "application/json"}
+        return {
+            "Authorization": f"Bearer {self.token}",
+            "Content-Type": "application/json"
+        }
 
-    def _select_model(self, source_lang: str, target_lang: str) -> tuple:
-        """
-        En uygun modeli seç
-        
-        Returns:
-            (model_name, model_type) tuple
-        """
-        # Auto ise varsayılan olarak en kullan
+    def _select_model(self, source_lang: str, target_lang: str) -> str:
+        """Select best model for language pair"""
         src = "en" if source_lang == "auto" else source_lang
-        tgt = target_lang
         
-        # Önce OPUS modeli dene (daha hızlı)
-        opus_key = (src, tgt)
-        if opus_key in OPUS_MODELS:
-            return OPUS_MODELS[opus_key], "opus"
+        # Check custom model overrides
+        if src == "en" and target_lang == "tr":
+            return self.model_en_tr
+        if src == "tr" and target_lang == "en":
+            return self.model_tr_en
+            
+        # Check OPUS models
+        key = (src, target_lang)
+        if key in OPUS_MODELS:
+            return OPUS_MODELS[key]
         
-        # Sonra ters yönü dene
-        reverse_key = (tgt, src)
-        if reverse_key in OPUS_MODELS:
-            # Ters model var ama biz ters çeviri yapamayız
-            pass
-        
-        # NLLB kullan (çoklu dil)
-        return "facebook/nllb-200-distilled-600M", "nllb"
+        # Fallback to NLLB
+        return "facebook/nllb-200-distilled-600M"
 
     def translate(self, text: str, target_lang: str = "tr", source_lang: str = "auto",
                  doc_type: str = None, preserve_format: bool = True) -> TranslationResult:
         """
-        Metni çevir
-
+        Translate text
+        
         Args:
-            text: Çevrilecek metin
-            target_lang: Hedef dil kodu
-            source_lang: Kaynak dil kodu
-            doc_type: Belge türü (uyumluluk için)
-            preserve_format: Format koruma (uyumluluk için)
-
+            text: Text to translate
+            target_lang: Target language code
+            source_lang: Source language code
+            
         Returns:
-            TranslationResult: Çeviri sonucu
+            TranslationResult
         """
-        # Boş metin kontrolü
+        # Empty text check
         if not text or not text.strip():
             return TranslationResult(
                 text=text,
@@ -172,115 +146,112 @@ class HuggingFaceTranslator:
                 model="passthrough"
             )
 
-        # Token yoksa passthrough
+        # Token check
         if not self.token:
-            return TranslationResult(
-                text=text,
-                source_lang=source_lang,
-                target_lang=target_lang,
-                success=True,
-                error="Token yok, çeviri yapılmadı",
-                model="passthrough"
-            )
-
-        # Cache kontrolü
-        cache_key = f"{source_lang}:{target_lang}:{text[:100]}"
-        if cache_key in self._cache:
-            cached = self._cache[cache_key]
-            return TranslationResult(
-                text=cached["text"],
-                source_lang=source_lang,
-                target_lang=target_lang,
-                success=True,
-                model=cached["model"] + " (cached)"
-            )
-
-        # Model seç
-        model_name, model_type = self._select_model(source_lang, target_lang)
-        
-        # Çeviri yap
-        try:
-            if model_type == "opus":
-                result = self._translate_opus(text, model_name)
-            else:
-                result = self._translate_nllb(text, source_lang, target_lang, model_name)
-            
-            # Cache'e ekle
-            self._cache[cache_key] = {"text": result, "model": model_name}
-            
-            return TranslationResult(
-                text=result,
-                source_lang=source_lang,
-                target_lang=target_lang,
-                success=True,
-                model=model_name
-            )
-
-        except Exception as e:
-            error_msg = str(e)
-            print(f"⚠️ HF Çeviri hatası ({model_name}): {error_msg}")
-            
-            # Model yükleniyorsa bekle ve tekrar dene
-            if "loading" in error_msg.lower():
-                print("⏳ Model yükleniyor, 20 saniye bekleniyor...")
-                time.sleep(20)
-                return self.translate(text, target_lang, source_lang, doc_type, preserve_format)
-            
+            print(f"❌ NO TOKEN - Cannot translate: {text[:50]}...")
             return TranslationResult(
                 text=text,
                 source_lang=source_lang,
                 target_lang=target_lang,
                 success=False,
-                error=error_msg,
-                model=model_name
+                error="No HF token available",
+                model="none"
             )
 
-    def _translate_opus(self, text: str, model_name: str) -> str:
-        """OPUS modeli ile çeviri"""
-        api_url = f"https://api-inference.huggingface.co/models/{model_name}"
-        
-        response = requests.post(
-            api_url,
-            headers=self._get_headers(),
-            json={"inputs": text},
-            timeout=60
-        )
-        
-        if response.status_code != 200:
-            error_data = response.json() if response.text else {}
-            raise Exception(f"API Error {response.status_code}: {error_data}")
-        
-        result = response.json()
-        
-        if isinstance(result, list) and len(result) > 0:
-            return result[0].get("translation_text", text)
-        elif isinstance(result, dict) and "error" in result:
-            raise Exception(result["error"])
-        
-        return text
+        # Cache check
+        cache_key = f"{source_lang}:{target_lang}:{hash(text)}"
+        if cache_key in self._cache:
+            return TranslationResult(
+                text=self._cache[cache_key],
+                source_lang=source_lang,
+                target_lang=target_lang,
+                success=True,
+                model="cached"
+            )
 
-    def _translate_nllb(self, text: str, source_lang: str, target_lang: str, model_name: str) -> str:
-        """NLLB modeli ile çeviri"""
-        api_url = f"https://api-inference.huggingface.co/models/{model_name}"
+        # Select model
+        model = self._select_model(source_lang, target_lang)
         
-        # NLLB dil kodlarını al
-        src_code = NLLB_LANG_CODES.get(source_lang if source_lang != "auto" else "en", "eng_Latn")
-        tgt_code = NLLB_LANG_CODES.get(target_lang, "tur_Latn")
+        # Translate with retry
+        for attempt in range(self._retry_count):
+            try:
+                result = self._call_hf_api(text, model, source_lang, target_lang)
+                
+                # Cache result
+                self._cache[cache_key] = result
+                
+                print(f"✅ Translated ({model}): {text[:30]}... -> {result[:30]}...")
+                
+                return TranslationResult(
+                    text=result,
+                    source_lang=source_lang,
+                    target_lang=target_lang,
+                    success=True,
+                    model=model
+                )
+                
+            except Exception as e:
+                error_msg = str(e)
+                print(f"⚠️ Attempt {attempt + 1}/{self._retry_count} failed: {error_msg}")
+                
+                # Check if model is loading
+                if "loading" in error_msg.lower() or "503" in error_msg:
+                    wait_time = self._retry_delay * (attempt + 1)
+                    print(f"⏳ Model loading, waiting {wait_time}s...")
+                    time.sleep(wait_time)
+                    continue
+                
+                # Other errors
+                if attempt == self._retry_count - 1:
+                    return TranslationResult(
+                        text=text,
+                        source_lang=source_lang,
+                        target_lang=target_lang,
+                        success=False,
+                        error=error_msg,
+                        model=model
+                    )
+                
+                time.sleep(self._retry_delay)
+
+        return TranslationResult(
+            text=text,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            success=False,
+            error="Max retries exceeded",
+            model=model
+        )
+
+    def _call_hf_api(self, text: str, model: str, source_lang: str, target_lang: str) -> str:
+        """Call HF Inference API"""
+        api_url = f"https://api-inference.huggingface.co/models/{model}"
         
-        payload = {
-            "inputs": text,
-            "parameters": {
-                "src_lang": src_code,
-                "tgt_lang": tgt_code
+        # NLLB requires different payload
+        if "nllb" in model.lower():
+            src_code = NLLB_LANG_CODES.get(source_lang if source_lang != "auto" else "en", "eng_Latn")
+            tgt_code = NLLB_LANG_CODES.get(target_lang, "tur_Latn")
+            payload = {
+                "inputs": text,
+                "parameters": {
+                    "src_lang": src_code,
+                    "tgt_lang": tgt_code
+                }
             }
-        }
+        else:
+            payload = {"inputs": text}
         
         response = requests.post(
             api_url,
             headers=self._get_headers(),
             json=payload,
-            timeout=60
+            timeout=120
         )
+        
+        if response.status_code == 503:
+            # Model is loading
+            data = response.json()
+            raise Exception(f"Model loading: {data.get('error', 'Unknown')}")
         
         if response.status_code != 200:
             error_data = response.json() if response.text else {}
@@ -290,55 +261,49 @@ class HuggingFaceTranslator:
         
         if isinstance(result, list) and len(result) > 0:
             return result[0].get("translation_text", text)
-        elif isinstance(result, dict) and "error" in result:
-            raise Exception(result["error"])
+        elif isinstance(result, dict):
+            if "error" in result:
+                raise Exception(result["error"])
+            return result.get("translation_text", text)
         
         return text
 
     def translate_batch(self, texts: List[str], target_lang: str = "tr",
                        source_lang: str = "auto") -> List[TranslationResult]:
-        """
-        Birden çok metni çevir (batch)
-        """
+        """Translate multiple texts"""
         results = []
         total = len(texts)
         
         for i, text in enumerate(texts):
-            if i % 5 == 0:
-                print(f"📝 Çeviri: {i}/{total}")
-            
+            print(f"📝 Translating {i + 1}/{total}...")
             result = self.translate(text, target_lang, source_lang)
             results.append(result)
             
-            # Rate limiting - HF free tier için
-            if i > 0 and i % 5 == 0:
-                time.sleep(1)
+            # Rate limiting for free tier
+            if i > 0 and i % 3 == 0:
+                time.sleep(0.5)
         
         return results
 
-    def translate_blocks(self, blocks: List[Dict], target_lang: str = "tr",
-                        source_lang: str = "auto") -> List[str]:
-        """Metin bloklarını çevir"""
-        texts = [block.get("text", "") for block in blocks]
-        results = self.translate_batch(texts, target_lang, source_lang)
-        return [r.text if r.success else texts[i] for i, r in enumerate(results)]
-
     def clear_cache(self):
-        """Çeviri cache'ini temizle"""
+        """Clear translation cache"""
         self._cache.clear()
-
-    def get_supported_languages(self) -> Dict[str, str]:
-        """Desteklenen dilleri döndür"""
-        return LANGUAGE_NAMES.copy()
 
 
 # Singleton instance
-_hf_translator_instance = None
+_translator_instance = None
 
 
-def get_hf_translator() -> HuggingFaceTranslator:
-    """Singleton HF translator örneği al"""
-    global _hf_translator_instance
-    if _hf_translator_instance is None:
-        _hf_translator_instance = HuggingFaceTranslator()
-    return _hf_translator_instance
+def get_translator():
+    """Get singleton translator instance"""
+    global _translator_instance
+    if _translator_instance is None:
+        _translator_instance = HFTranslatorV2()
+    return _translator_instance
+
+
+def translate_text(text: str, target_lang: str = "tr", source_lang: str = "auto") -> str:
+    """Simple translation function"""
+    translator = get_translator()
+    result = translator.translate(text, target_lang, source_lang)
+    return result.text

@@ -123,8 +123,8 @@ def get_languages():
 @app.route('/translate', methods=['POST'])
 def translate_pdf():
     """
-    PDF'i PDF'e çevir - Profesyonel Version
-    Türkce font ile, gorsel bütünlüğü koruyarak
+    PDF'i PDF'e çevir - SPAN-BASED VERSION
+    Layout koruyarak, satır satır çeviri
     """
     def _process():
         if 'file' not in request.files:
@@ -134,21 +134,24 @@ def translate_pdf():
         source_lang = request.form.get('source', 'auto')
         target_lang = request.form.get('target', 'tr')
 
-        print(f"📄 PDF Çeviri: {file.filename}")
+        print(f"\n{'='*60}")
+        print(f"📄 PDF Çeviri Başladı: {file.filename}")
         print(f"🌐 {source_lang} → {target_lang}")
+        print(f"{'='*60}")
 
         # PDF'i oku
         pdf_bytes = file.read()
 
-        # Converter oluştur
-        converter = create_converter("hybrid")
+        # SPAN-BASED TRANSLATOR - BOMBA LAYOUT KORUMA
+        from converters.span_translator import SpanBasedTranslator
+        translator = SpanBasedTranslator()
 
         # İlerleme callback'i
         def progress(page, total):
-            print(f"✅ Sayfa {page}/{total} tamamlandı")
+            print(f"📝 Sayfa {page}/{total} işleniyor...")
 
         # Çevir
-        result = converter.convert(
+        result = translator.translate_pdf(
             pdf_bytes,
             source_lang=source_lang,
             target_lang=target_lang,
@@ -156,7 +159,8 @@ def translate_pdf():
         )
 
         output_filename = file.filename.replace('.pdf', f'_ceviri_{target_lang}.pdf')
-        print(f"✅ Tamamlandı: {output_filename}")
+        print(f"\n✅ Tamamlandı: {output_filename}")
+        print(f"{'='*60}\n")
 
         return send_file(
             io.BytesIO(result),

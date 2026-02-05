@@ -269,21 +269,25 @@ class SimplePDFTranslator:
 
 
 # Converter factory
-def create_converter(converter_type: str = "layout"):
+def create_converter(converter_type: str = "span"):
     """
     Converter oluştur
 
     Args:
         converter_type: 
-            - "layout" (varsayılan): Layout-koruyucu çevirici - PDF yapısı korunur
+            - "span" (VARSAYILAN): Span-based translator - BOMBA layout koruması
+            - "layout": Layout-koruyucu çevirici
             - "hybrid": Hibrit çevirici - Görsel arka plan + metin katmanı
             - "simple": Basit çevirici - Sadece metin
 
     Returns:
         Converter instance
     """
-    if converter_type == "layout":
-        # Layout-koruyucu çevirici - EN İYİ SONUÇ
+    if converter_type == "span":
+        # SPAN-BASED - En iyi layout koruması
+        from converters.span_translator import SpanBasedTranslator
+        return SpanBasedTranslator()
+    elif converter_type == "layout":
         from converters.layout_translator import LayoutPreservingTranslator
         return LayoutPreservingTranslator()
     elif converter_type == "simple":
@@ -291,13 +295,14 @@ def create_converter(converter_type: str = "layout"):
     elif converter_type == "hybrid":
         return PDFToPDFConverter()
     else:
-        # Varsayılan: Layout-koruyucu
-        from converters.layout_translator import LayoutPreservingTranslator
-        return LayoutPreservingTranslator()
+        # Varsayılan: Span-based
+        from converters.span_translator import SpanBasedTranslator
+        return SpanBasedTranslator()
 
 
 # Test için
 if __name__ == "__main__":
     # Test kodu
     pass
+
 
