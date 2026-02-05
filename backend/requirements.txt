@@ -5,6 +5,7 @@
 flask
 flask-cors
 gunicorn
+gevent
 
 # PDF İşleme
 PyMuPDF

@@ -16,5 +16,5 @@ cmds = ["pip install --no-cache-dir -r backend/requirements.txt"]
 cmds = []
 
 [start]
-# Timeout artırıldı: 300s, graceful-timeout: 120s, gevent worker
-cmd = "gunicorn backend.app:app --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 600 --graceful-timeout 120"
+# Gevent async worker - timeout sorunlarını çözer
+cmd = "gunicorn backend.app:app --bind 0.0.0.0:$PORT --worker-class gevent --workers 2 --timeout 0"
