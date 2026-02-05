@@ -204,7 +204,7 @@ class MyMemoryProvider:
     def __init__(self, email: str = None):
         self.email = email or os.environ.get("MYMEMORY_EMAIL", "")
         self.base_url = "https://api.mymemory.translated.net/get"
-        self.timeout = 30
+        self.timeout = 10  # 30'dan 10'a düşürüldü
         self.available = True  # Her zaman kullanılabilir
         
     def translate(self, text: str, target_lang: str, source_lang: str = "auto") -> TranslationResult:
@@ -257,7 +257,7 @@ class LingvaProvider:
             "https://translate.plausibility.cloud",
             "https://lingva.garuber.eu",
         ]
-        self.timeout = 30
+        self.timeout = 10  # 30'dan 10'a düşürüldü
         self.available = True
         
     def translate(self, text: str, target_lang: str, source_lang: str = "auto") -> TranslationResult:
