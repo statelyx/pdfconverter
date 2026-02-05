@@ -20,7 +20,12 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 ENABLE_GEMINI = os.environ.get("ENABLE_GEMINI", "false").lower() == "true"
 
 # Hugging Face Token - Ücretsiz çeviri için
-HF_TOKEN = os.environ.get("HF_TOKEN", "")
+# Birden fazla ENV değişken adını destekle
+HF_TOKEN = (
+    os.environ.get("HF_TOKEN", "") or 
+    os.environ.get("HUGGINGFACE_API_KEY", "") or
+    os.environ.get("HUGGINGFACE_READ_API_KEY", "")
+)
 
 # LibreTranslate URL - Self-host için
 LIBRETRANSLATE_URL = os.environ.get("LIBRETRANSLATE_URL", "")

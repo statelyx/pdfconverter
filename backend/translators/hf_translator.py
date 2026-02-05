@@ -99,8 +99,14 @@ class HuggingFaceTranslator:
         
         Args:
             token: Hugging Face API token (opsiyonel, ENV'den de alınabilir)
-        """
-        self.token = token or os.environ.get("HF_TOKEN", "") or CONFIG_HF_TOKEN
+        # Birden fazla ENV değişken adını destekle
+        self.token = (
+            token or 
+            os.environ.get("HF_TOKEN", "") or 
+            os.environ.get("HUGGINGFACE_API_KEY", "") or
+            os.environ.get("HUGGINGFACE_READ_API_KEY", "") or
+            CONFIG_HF_TOKEN
+        )
         self._cache = {}
         self._model_status = {}  # Model kullanılabilirlik durumu
         

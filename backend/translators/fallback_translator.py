@@ -53,7 +53,12 @@ class FallbackTranslator:
 
     def __init__(self):
         """Translator başlat"""
-        self.hf_token = os.environ.get("HF_TOKEN", "")
+        # Birden fazla ENV değişken adını destekle
+        self.hf_token = (
+            os.environ.get("HF_TOKEN", "") or 
+            os.environ.get("HUGGINGFACE_API_KEY", "") or
+            os.environ.get("HUGGINGFACE_READ_API_KEY", "")
+        )
         self.libre_url = os.environ.get("LIBRETRANSLATE_URL", "")
         self.provider = os.environ.get("TRANSLATOR_PROVIDER", "hf")
         self._cache = {}
