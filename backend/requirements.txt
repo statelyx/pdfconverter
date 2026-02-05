@@ -25,5 +25,8 @@ opencv-python-headless
 requests
 urllib3
 
+# Progress bar
+tqdm
+
 # Yapılandırma
 python-dotenv
