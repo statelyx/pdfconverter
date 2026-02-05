@@ -3,17 +3,33 @@ nixPkgs = ["python311", "python311Packages.pip", "python311Packages.setuptools"]
 aptPkgs = [
     "libgl1",
     "libgl1-mesa-glx",
+    "libgl1-mesa-dri",
     "libglib2.0-0",
     "libsm6",
     "libxext6",
     "libxrender1",
     "libx11-6",
+    "libx11-xcb1",
     "libxcb1",
     "libxcb-xfixes0",
     "libxcb-shm0",
+    "libxcb-render0",
+    "libxcb-shape0",
+    "libxcb-xinerama0",
+    "libxcb-icccm4",
+    "libxcb-image0",
+    "libxcb-keysyms1",
+    "libxcb-randr0",
+    "libxcb-render-util0",
+    "libxcb-sync1",
     "libfontconfig1",
     "libxfixes3",
-    "libxi6"
+    "libxi6",
+    "libxkbcommon0",
+    "libxkbcommon-x11-0",
+    "libegl1",
+    "libgbm1",
+    "libdrm2"
 ]
 
 [phases.install]
