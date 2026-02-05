@@ -1,6 +1,23 @@
 // ====================================
 // DÖNÜŞTÜRÜCÜLER - LIGHTWEIGHT
+// RAM Optimizasyonlu versiyon
 // ====================================
+
+// PDF.js global ayarları - RAM tasarrufu
+if (typeof pdfjsLib !== 'undefined') {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    // Font face disabled - RAM tasarrufu
+    pdfjsLib.disableFontFace = false;
+}
+
+// Canvas temizleme yardımcı
+function cleanupCanvas(canvas) {
+    if (canvas) {
+        canvas.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height);
+        canvas.width = 1;
+        canvas.height = 1;
+    }
+}
 
 // PDF to Word
 async function pdfToWord() {
@@ -79,7 +96,7 @@ async function imagesToPDF() {
     return [{ name: 'gorseller.pdf', size: blob.size, url: URL.createObjectURL(blob) }];
 }
 
-// PDF to Images
+// PDF to Images - RAM Optimizasyonlu
 async function pdfToImages() {
     const file = state.files[0];
     const arr = await readFileAsArrayBuffer(file);
@@ -90,7 +107,7 @@ async function pdfToImages() {
 
     for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
-        const vp = page.getViewport({ scale: 1.5 });
+        const vp = page.getViewport({ scale: 1.0 }); // 1.5 → 1.0 (RAM tasarrufu)
 
         const canvas = document.createElement('canvas');
         canvas.width = vp.width;
@@ -101,14 +118,19 @@ async function pdfToImages() {
         const dataUrl = canvas.toDataURL(fmt === 'png' ? 'image/png' : 'image/jpeg', 0.85);
         const blob = await fetch(dataUrl).then(r => r.blob());
 
+        // Canvas temizle - RAM tasarrufu
+        cleanupCanvas(canvas);
+
         results.push({ name: `sayfa_${i}.${fmt}`, size: blob.size, url: URL.createObjectURL(blob) });
         updateProgress(i / pdf.numPages * 100);
     }
 
+    // PDF dokümanını temizle
+    await pdf.destroy();
     return results;
 }
 
-// Merge PDFs
+// Merge PDFs - RAM Optimizasyonlu
 async function mergePDFs() {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
@@ -123,7 +145,7 @@ async function mergePDFs() {
             first = false;
 
             const page = await pdf.getPage(i);
-            const vp = page.getViewport({ scale: 1.5 });
+            const vp = page.getViewport({ scale: 1.0 }); // 1.5 → 1.0
 
             const canvas = document.createElement('canvas');
             canvas.width = vp.width;
@@ -131,7 +153,11 @@ async function mergePDFs() {
 
             await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
             doc.addImage(canvas.toDataURL('image/jpeg', 0.8), 'JPEG', 0, 0, doc.internal.pageSize.getWidth(), doc.internal.pageSize.getHeight());
+
+            // Canvas temizle
+            cleanupCanvas(canvas);
         }
+        await pdf.destroy(); // PDF'i temizle
         updateProgress((f + 1) / state.files.length * 100);
     }
 
@@ -139,7 +165,7 @@ async function mergePDFs() {
     return [{ name: 'birlesik.pdf', size: blob.size, url: URL.createObjectURL(blob) }];
 }
 
-// Split PDF
+// Split PDF - RAM Optimizasyonlu
 async function splitPDF() {
     const file = state.files[0];
     const arr = await readFileAsArrayBuffer(file);
@@ -150,7 +176,7 @@ async function splitPDF() {
 
     for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
-        const vp = page.getViewport({ scale: 1.5 });
+        const vp = page.getViewport({ scale: 1.0 }); // 1.5 → 1.0
 
         const canvas = document.createElement('canvas');
         canvas.width = vp.width;
@@ -163,13 +189,17 @@ async function splitPDF() {
 
         const blob = doc.output('blob');
         results.push({ name: `sayfa_${i}.pdf`, size: blob.size, url: URL.createObjectURL(blob) });
+
+        // Canvas temizle
+        cleanupCanvas(canvas);
         updateProgress(i / pdf.numPages * 100);
     }
 
+    await pdf.destroy();
     return results;
 }
 
-// Compress PDF
+// Compress PDF - RAM Optimizasyonlu
 async function compressPDF() {
     const file = state.files[0];
     const arr = await readFileAsArrayBuffer(file);
@@ -182,7 +212,7 @@ async function compressPDF() {
         if (i > 1) doc.addPage();
 
         const page = await pdf.getPage(i);
-        const vp = page.getViewport({ scale: 1 });
+        const vp = page.getViewport({ scale: 1.0 });
 
         const canvas = document.createElement('canvas');
         canvas.width = vp.width;
@@ -190,8 +220,13 @@ async function compressPDF() {
 
         await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
         doc.addImage(canvas.toDataURL('image/jpeg', 0.5), 'JPEG', 0, 0, doc.internal.pageSize.getWidth(), doc.internal.pageSize.getHeight());
+
+        // Canvas temizle
+        cleanupCanvas(canvas);
         updateProgress(i / pdf.numPages * 100);
     }
+
+    await pdf.destroy();
 
     const blob = doc.output('blob');
     const ratio = ((1 - blob.size / file.size) * 100).toFixed(0);

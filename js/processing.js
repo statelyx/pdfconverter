@@ -7,6 +7,37 @@
 // Railway deploy tamamlandığında js/config.js içindeki URL'yu güncelleyin
 
 // ====================================
+// FETCH WITH TIMEOUT - CORS/Timeout çözümü
+// ====================================
+
+// 10 dakika timeout - büyük PDF'ler için
+const BACKEND_TIMEOUT = 600000; // 10 dakika (ms)
+
+function fetchWithTimeout(url, options, timeout = BACKEND_TIMEOUT) {
+    return new Promise(function (resolve, reject) {
+        var controller = new AbortController();
+        var timeoutId = setTimeout(function () {
+            controller.abort();
+            reject(new Error('Backend isteği zaman aşımına uğradı (10 dakika). Daha küçük bir dosya deneyin.'));
+        }, timeout);
+
+        fetch(url, Object.assign({}, options, { signal: controller.signal }))
+            .then(function (response) {
+                clearTimeout(timeoutId);
+                resolve(response);
+            })
+            .catch(function (error) {
+                clearTimeout(timeoutId);
+                if (error.name === 'AbortError') {
+                    reject(new Error('İstek zaman aşımına uğradı'));
+                } else {
+                    reject(error);
+                }
+            });
+    });
+}
+
+// ====================================
 // ANA İŞLEM FONKSİYONU
 // ====================================
 
@@ -149,7 +180,7 @@ async function translatePDFBackend() {
     updateProgress(30);
 
     try {
-        var response = await fetch(BACKEND_URL + endpoint, {
+        var response = await fetchWithTimeout(BACKEND_URL + endpoint, {
             method: 'POST',
             body: formData
         });
@@ -205,7 +236,7 @@ async function pdfToWordBackend() {
     updateProgress(30);
 
     try {
-        var response = await fetch(BACKEND_URL + '/pdf-to-word', {
+        var response = await fetchWithTimeout(BACKEND_URL + '/pdf-to-word', {
             method: 'POST',
             body: formData
         });
@@ -259,7 +290,7 @@ async function pdfToExcelBackend() {
     updateProgress(30);
 
     try {
-        var response = await fetch(BACKEND_URL + '/pdf-to-excel', {
+        var response = await fetchWithTimeout(BACKEND_URL + '/pdf-to-excel', {
             method: 'POST',
             body: formData
         });
@@ -312,7 +343,7 @@ async function pdfToImageBackend() {
     updateProgress(30);
 
     try {
-        var response = await fetch(BACKEND_URL + '/pdf-to-image', {
+        var response = await fetchWithTimeout(BACKEND_URL + '/pdf-to-image', {
             method: 'POST',
             body: formData
         });
@@ -362,7 +393,7 @@ async function pdfToImagesBackend() {
     updateProgress(30);
 
     try {
-        var response = await fetch(BACKEND_URL + '/pdf-to-images', {
+        var response = await fetchWithTimeout(BACKEND_URL + '/pdf-to-images', {
             method: 'POST',
             body: formData
         });
@@ -402,7 +433,7 @@ async function compressPDFBackend() {
     updateProgress(30);
 
     try {
-        var response = await fetch(BACKEND_URL + '/compress', {
+        var response = await fetchWithTimeout(BACKEND_URL + '/compress', {
             method: 'POST',
             body: formData
         });
@@ -437,7 +468,7 @@ async function compressPDFBackend() {
 
 async function checkBackendHealth() {
     try {
-        var response = await fetch(BACKEND_URL + '/health');
+        var response = await fetchWithTimeout(BACKEND_URL + '/health');
         if (response.ok) {
             var data = await response.json();
             console.log('✅ Backend v' + data.version + ' aktif');
