@@ -161,46 +161,59 @@ class SpanBasedTranslator:
 
     def _translate_and_render_page(self, page: fitz.Page, lines: List[TextLine],
                                    source_lang: str, target_lang: str):
-        """Translate all lines and render on page"""
+        """Translate all lines and render on page - BATCH VERSION"""
         
-        # Collect all translations first
-        translations = []
+        # Çevrilecek metinleri topla
+        texts_to_translate = []
+        line_indices = []
         
         for i, line in enumerate(lines):
             original_text = line.full_text.strip()
             
             # Skip empty or very short text
             if len(original_text) < 2:
-                translations.append((line, original_text))
                 continue
             
             # Skip if only numbers/symbols
             if self._is_number_or_symbol(original_text):
-                translations.append((line, original_text))
                 continue
             
-            # Translate
-            try:
-                result = self.translator.translate(
-                    original_text,
-                    target_lang=target_lang,
-                    source_lang=source_lang
-                )
-                
-                translated = result.text if result.success else original_text
-                translations.append((line, translated))
-                
-                if result.success and translated != original_text:
-                    print(f"   ✓ Line {i+1}: {original_text[:30]}... → {translated[:30]}...")
-                
-            except Exception as e:
-                print(f"   ⚠️ Line {i+1} error: {e}")
-                translations.append((line, original_text))
+            texts_to_translate.append(original_text)
+            line_indices.append(i)
         
-        # Now render all translations
-        for line, translated_text in translations:
-            if translated_text and translated_text != line.full_text:
-                self._render_translated_line(page, line, translated_text)
+        # Batch çeviri yap - tek seferde tüm metinleri çevir
+        print(f"   📦 Batch çeviri: {len(texts_to_translate)} metin")
+        
+        translations = {}
+        
+        # 10'lu gruplar halinde çevir (rate limiting için)
+        batch_size = 10
+        for batch_start in range(0, len(texts_to_translate), batch_size):
+            batch_end = min(batch_start + batch_size, len(texts_to_translate))
+            batch_texts = texts_to_translate[batch_start:batch_end]
+            batch_indices = line_indices[batch_start:batch_end]
+            
+            for j, text in enumerate(batch_texts):
+                idx = batch_indices[j]
+                try:
+                    result = self.translator.translate(
+                        text,
+                        target_lang=target_lang,
+                        source_lang=source_lang
+                    )
+                    
+                    if result.success and result.text != text:
+                        translations[idx] = result.text
+                        print(f"   ✓ Line {idx+1}: {text[:25]}... → {result.text[:25]}...")
+                    
+                except Exception as e:
+                    print(f"   ⚠️ Line {idx+1} error: {e}")
+        
+        # Render all translations
+        print(f"   🎨 Rendering {len(translations)} translations...")
+        for idx, translated_text in translations.items():
+            line = lines[idx]
+            self._render_translated_line(page, line, translated_text)
 
     def _render_translated_line(self, page: fitz.Page, line: TextLine, translated: str):
         """Render translated text in place of original line"""
