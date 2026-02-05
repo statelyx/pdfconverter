@@ -31,7 +31,8 @@ from core.pdf_reader import PDFReader
 
 # Converters
 from converters.pdf_to_pdf import create_converter
-from converters.pdf_to_word import convert_pdf_to_word
+# pdf_to_word LAZY IMPORT - opencv bağımlılığı nedeniyle boot sırasında import edilmiyor
+# from converters.pdf_to_word import convert_pdf_to_word
 from converters.pdf_to_excel import convert_pdf_to_excel
 from converters.pdf_to_image import PDFToImageConverter, PDFPreviewGenerator
 
@@ -260,6 +261,9 @@ def pdf_to_word():
 
         pdf_bytes = file.read()
 
+        # LAZY IMPORT - opencv bağımlılığı boot sırasında yüklenmesin
+        from converters.pdf_to_word import convert_pdf_to_word
+        
         result = convert_pdf_to_word(
             pdf_bytes,
             translate=translate,

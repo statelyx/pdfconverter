@@ -2,15 +2,17 @@
 """
 PDF to Word Converter
 pdf2docx ile PDF'ten Word'e dönüştürme
+
+NOT: pdf2docx modülü opencv gerektirdiği için LAZY IMPORT yapılıyor.
+Bu sayede gunicorn boot sırasında cv2 import edilmiyor.
 """
 
 import io
 import os
 import tempfile
-from typing import Optional, List
+from typing import Optional, List, TYPE_CHECKING
 
 import fitz  # PyMuPDF
-from pdf2docx import Converter
 from docx import Document
 from docx.shared import Pt, Inches, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -18,6 +20,13 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from core.pdf_reader import PDFReader
 from translators.gemini_translator import get_translator
 from core.font_manager import FontManager
+
+# pdf2docx LAZY IMPORT - opencv bağımlılığı nedeniyle
+# Boot sırasında import edilmiyor, sadece fonksiyon çağrıldığında
+def _get_pdf2docx_converter():
+    """pdf2docx Converter'ı lazy olarak import et"""
+    from pdf2docx import Converter
+    return Converter
 
 
 class PDFToWordConverter:
@@ -52,7 +61,8 @@ class PDFToWordConverter:
             docx_path = docx_file.name
 
         try:
-            # PDF'ten Word'e dönüştür
+            # PDF'ten Word'e dönüştür (LAZY IMPORT)
+            Converter = _get_pdf2docx_converter()
             cv = Converter(pdf_path)
 
             if translate:
@@ -76,7 +86,7 @@ class PDFToWordConverter:
             if os.path.exists(docx_path):
                 os.unlink(docx_path)
 
-    def _convert_with_translation(self, converter: Converter, output_path: str,
+    def _convert_with_translation(self, converter, output_path: str,
                                  source_lang: str, target_lang: str):
         """Çeviri ile Word'e dönüştür"""
         # Önce PDF'i oku
@@ -173,7 +183,8 @@ class AdvancedPDFToWordConverter:
             docx_path = docx_file.name
 
         try:
-            # pdf2docx ile convert
+            # pdf2docx ile convert (LAZY IMPORT)
+            Converter = _get_pdf2docx_converter()
             cv = Converter(pdf_path)
             cv.convert(docx_path)
             cv.close()
