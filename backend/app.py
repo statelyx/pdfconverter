@@ -57,6 +57,7 @@ def after_request(response):
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
     response.headers.add('Access-Control-Expose-Headers', 'Content-Disposition')
+    response.headers.add('Access-Control-Max-Age', '3600')
     return response
 
 # Maksimum dosya boyutu

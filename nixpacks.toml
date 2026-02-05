@@ -17,4 +17,5 @@ cmds = []
 
 [start]
 # Gevent async worker - timeout sorunlarını çözer
-cmd = "gunicorn backend.app:app --bind 0.0.0.0:$PORT --worker-class gevent --workers 2 --timeout 0"
+# timeout 600s, graceful-timeout 300s, keepalive 30s - Railway için optimize
+cmd = "gunicorn backend.app:app --bind 0.0.0.0:$PORT --worker-class gevent --workers 2 --timeout 600 --graceful-timeout 300 --keepalive 30"
