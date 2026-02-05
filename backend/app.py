@@ -41,7 +41,23 @@ from translators.gemini_translator import get_translator
 
 # Flask uygulaması
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+
+# CORS - Tüm originlere izin ver (Vercel için gerekli)
+CORS(app, 
+     resources={r"/*": {"origins": "*"}},
+     supports_credentials=True,
+     allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+     expose_headers=["Content-Disposition"])
+
+# Preflight OPTIONS istekleri için manuel handler
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    response.headers.add('Access-Control-Expose-Headers', 'Content-Disposition')
+    return response
 
 # Maksimum dosya boyutu
 app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE
