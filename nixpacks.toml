@@ -16,7 +16,6 @@ cmds = ["pip install --no-cache-dir -r backend/requirements.txt"]
 cmds = []
 
 [start]
-# Gevent async worker - timeout sorunlarını çözer
-# workers=1: gevent async olduğu için tek worker yeterli (daha az memory)
-# timeout 600s, graceful-timeout 300s - Railway için optimize
-cmd = "gunicorn backend.app:app --bind 0.0.0.0:$PORT --worker-class gevent --workers 1 --timeout 600 --graceful-timeout 300 --keepalive 30"
+# Sync worker - gevent Railway'de çalışmıyor
+# timeout 900s (15dk), graceful-timeout 60s - Railway için optimize
+cmd = "gunicorn backend.app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 900 --graceful-timeout 60 --keepalive 5"

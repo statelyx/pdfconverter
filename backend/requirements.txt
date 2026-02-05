@@ -21,11 +21,9 @@ openpyxl
 # Görüntü İşleme (Headless - sunucu ortamları için)
 opencv-python-headless
 
-# HTTP İstekleri (LibreTranslate proxy için)
+# HTTP İstekleri
 requests
-
-# Çeviri ve AI (Ücretsiz API)
-google-generativeai
+urllib3
 
 # Yapılandırma
 python-dotenv

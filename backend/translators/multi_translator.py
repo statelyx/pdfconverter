@@ -209,17 +209,9 @@ class MyMemoryProvider:
     def __init__(self, email: str = None):
         self.email = email or os.environ.get("MYMEMORY_EMAIL", "")
         self.base_url = "https://api.mymemory.translated.net/get"
-        self.timeout = 30
-        self.max_retries = 3
+        self.timeout = 15  # 15 saniye - Railway timeout için
+        self.max_retries = 2  # 2 retry yeterli
         self.available = True
-
-        # Session oluştur - SSL sorunları için
-        self.session = requests.Session()
-        # SSL verify'i kapat (Railway'de SSL certificate sorunları için)
-        self.session.verify = False
-        # Warning'leri gizle
-        import urllib3
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     def translate(self, text: str, target_lang: str, source_lang: str = "auto") -> TranslationResult:
         src = "en" if source_lang == "auto" else source_lang
@@ -229,11 +221,16 @@ class MyMemoryProvider:
         if self.email:
             params["de"] = self.email
 
-        # Retry mekanizması
+        # Retry mekanizması - her retry'da yeni session
         last_error = None
         for attempt in range(self.max_retries):
             try:
-                response = self.session.get(self.base_url, params=params, timeout=self.timeout)
+                # Her request'te yeni session oluştur (SSL sorunları için)
+                session = requests.Session()
+                session.verify = False
+
+                response = session.get(self.base_url, params=params, timeout=self.timeout)
+                session.close()
 
                 if response.status_code != 200:
                     raise Exception(f"HTTP {response.status_code}")
@@ -256,7 +253,7 @@ class MyMemoryProvider:
                     requests.exceptions.Timeout) as e:
                 last_error = str(e)
                 if attempt < self.max_retries - 1:
-                    time.sleep(0.5 * (attempt + 1))  # Exponential backoff
+                    time.sleep(0.3 * (attempt + 1))  # Backoff
                     continue
             except Exception as e:
                 last_error = str(e)
@@ -264,7 +261,7 @@ class MyMemoryProvider:
 
         return TranslationResult(
             text=text, source_lang=source_lang, target_lang=target_lang,
-            success=False, error=f"MyMemory hatası (retry: {self.max_retries}): {last_error}",
+            success=False, error=f"MyMemory hatası: {last_error}",
             provider=self.name
         )
 

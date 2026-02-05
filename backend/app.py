@@ -36,8 +36,8 @@ from converters.pdf_to_pdf import create_converter
 from converters.pdf_to_excel import convert_pdf_to_excel
 from converters.pdf_to_image import PDFToImageConverter, PDFPreviewGenerator
 
-# Translators
-from translators.gemini_translator import get_translator
+# Translators - Multi provider (HF, MyMemory, Libre)
+from translators.multi_translator import get_translator
 
 # Flask uygulaması
 app = Flask(__name__)
