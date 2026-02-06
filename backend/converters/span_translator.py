@@ -20,7 +20,7 @@ except ImportError:
     from translators.hf_translator import get_translator
 
 
-class HTMLBoxTranslator:
+class SpanBasedTranslator:
     """
     HTMLBox-based PDF translator with perfect layout preservation
 
@@ -477,13 +477,13 @@ class InPlaceTranslator:
         return cleaned.isdigit() or len(cleaned) == 0
 
 
-def create_span_translator(method: str = "htmlbox"):
+def create_span_translator(method: str = "span"):
     """
     Create translator instance
 
     Args:
-        method: "htmlbox" (default, new) or "inplace"
+        method: "span" (default) or "inplace"
     """
     if method == "inplace":
         return InPlaceTranslator()
-    return HTMLBoxTranslator()
+    return SpanBasedTranslator()
