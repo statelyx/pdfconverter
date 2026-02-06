@@ -5,10 +5,9 @@ Sıfır maliyet, maksimum güvenilirlik
 
 PROVIDER ÖNCELİK SIRASI:
 1. Hugging Face Router API (YENİ ENDPOINT)
-2. Argos Translate (Offline, ücretsiz)
+2. MyMemory API (Ücretsiz, günlük limit)
 3. LibreTranslate (Self-hosted)
-4. MyMemory API (Ücretsiz, günlük limit)
-5. Lingva Translate (Ücretsiz proxy)
+4. Lingva Translate (Ücretsiz proxy)
 
 Token Priority: WRITE -> READ -> API_KEY
 """
@@ -77,14 +76,6 @@ NLLB_LANG_CODES = {
     "ru": "rus_Cyrl", "ar": "arb_Arab", "zh": "zho_Hans",
     "ja": "jpn_Jpan", "ko": "kor_Hang", "nl": "nld_Latn",
     "pl": "pol_Latn", "pt": "por_Latn", "sv": "swe_Latn",
-}
-
-# Argos Translate dil kodları
-ARGOS_LANG_CODES = {
-    "en": "en", "tr": "tr", "de": "de", "fr": "fr",
-    "es": "es", "it": "it", "ru": "ru", "ar": "ar",
-    "zh": "zh", "ja": "ja", "ko": "ko", "nl": "nl",
-    "pl": "pl", "pt": "pt",
 }
 
 
@@ -349,38 +340,6 @@ class LibreTranslateProvider:
                 success=False, error=str(e), provider=self.name
             )
 
-class ArgosTranslateProvider:
-    """
-    Argos Translate - Offline, sıfır maliyet çeviri
-    """
-    name = "argos"
-    
-    def __init__(self):
-        self.available = False
-        try:
-            import argostranslate.package
-            import argostranslate.translate
-            self.available = True
-            # print("   ✓ Argos Translate yüklü")
-        except ImportError:
-            # print("   ⚠️ Argos Translate yüklü değil, 'pip install argostranslate' gerekli")
-            pass
-
-    def translate(self, text: str, target_lang: str, source_lang: str = "auto") -> TranslationResult:
-        if not self.available:
-            return TranslationResult(text=text, success=False, error="Argos not installed", provider=self.name)
-        
-        try:
-            import argostranslate.translate
-            src = "en" if source_lang == "auto" else source_lang
-            translated = argostranslate.translate.translate(text, src, target_lang)
-            return TranslationResult(
-                text=translated, source_lang=src, target_lang=target_lang,
-                success=True, provider=self.name
-            )
-        except Exception as e:
-            return TranslationResult(text=text, success=False, error=str(e), provider=self.name)
-
 # ============================================================================
 # ANA TRANSLATOR SINIFI
 # ============================================================================
@@ -406,6 +365,23 @@ class MultiProviderTranslator:
                 - parallel: Paralel çeviri aktif mi
                 - cache_enabled: Cache aktif mi
         """
+                    provider = provider_map[name]()
+                    providers.append(provider)
+                except Exception as e:
+                    print(f"⚠️ {name} provider başlatılamadı: {e}")
+        
+        return providers
+    
+    def __init__(self, config: Dict = None):
+        """
+        Translator başlat
+        
+        Args:
+            config: Yapılandırma
+                - providers: Provider listesi ["huggingface", "mymemory", "lingva", "libretranslate"]
+                - parallel: Paralel çeviri aktif mi
+                - cache_enabled: Cache aktif mi
+        """
         self.config = config or {}
         self._cache = {}
         self._cache_enabled = self.config.get("cache_enabled", True)
@@ -420,9 +396,8 @@ class MultiProviderTranslator:
     
     def _init_providers(self) -> List:
         """Provider'ları öncelik sırasına göre başlat"""
-        # MyMemory şu an çalışıyor, onu birincil yapalım
         provider_order = self.config.get("providers", [
-            "mymemory", "huggingface", "lingva", "libretranslate", "argos"
+            "mymemory", "huggingface", "lingva", "libretranslate"
         ])
         
         provider_map = {
@@ -430,7 +405,6 @@ class MultiProviderTranslator:
             "mymemory": MyMemoryProvider,
             "lingva": LingvaProvider,
             "libretranslate": LibreTranslateProvider,
-            "argos": ArgosTranslateProvider
         }
         
         providers = []
