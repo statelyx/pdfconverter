@@ -30,16 +30,31 @@ class FontManager:
             # Font dosyalarını kontrol et ve kaydet
             for font_family, styles in FONTS.items():
                 for style, font_path in styles.items():
-                    if os.path.exists(font_path):
+                    # Birden fazla olası yolu kontrol et
+                    from config import FONT_DIR, ROOT_FONT_DIR, BASE_DIR
+                    possible_paths = [
+                        font_path,
+                        os.path.join(FONT_DIR, os.path.basename(font_path)),
+                        os.path.join(ROOT_FONT_DIR, os.path.basename(font_path)),
+                        os.path.join(BASE_DIR, "fonts", os.path.basename(font_path)),
+                        os.path.join(os.path.dirname(BASE_DIR), "fonts", os.path.basename(font_path))
+                    ]
+                    
+                    real_path = None
+                    for p in possible_paths:
+                        if os.path.exists(p):
+                            real_path = p
+                            break
+                            
+                    if real_path:
                         try:
                             font_name = f"{font_family}-{style}"
-                            pdfmetrics.registerFont(TTFont(font_name, font_path))
-                            cls._font_cache[font_name] = font_path
-                            # Font kaydedildi (sessiz)
+                            pdfmetrics.registerFont(TTFont(font_name, real_path))
+                            cls._font_cache[font_name] = real_path
                         except Exception as e:
-                            pass  # Hata varsa sessiz geç
+                            print(f"Error registering font {font_family}-{style}: {e}")
                     else:
-                        pass  # Font yoksa sessiz geç
+                        pass # Font bulunamadı
 
             cls._fonts_registered = True
             cls._fallback_mode = False

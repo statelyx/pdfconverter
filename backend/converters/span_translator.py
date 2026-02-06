@@ -382,30 +382,37 @@ class SpanBasedTranslator:
 
         translations = {}
 
-        # CPU ve bellek optimizasyonu: Paralel yerine sıralı işlem
-        # ThreadPoolExecutor bellek overhead'i yaratıyor ve CPU'yu kasıyor
-        # Sıralı işlem daha stabil ve bellek dostu
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        batch_size = 3  # Küçük batch'ler API rate limit'e takılmamak için
+        # CPU ve bellek optimizasyonu: Makul worker sayısı ile paralel işlem
+        max_workers = 5  # Hız ve bellek dengesi
+        batch_size = 10  # Daha büyük batch ile timeout riski azalır
 
         for batch_start in range(0, len(texts_to_translate), batch_size):
             batch_end = min(batch_start + batch_size, len(texts_to_translate))
             batch_texts = texts_to_translate[batch_start:batch_end]
             batch_indices = block_indices[batch_start:batch_end]
 
-            for j, text in enumerate(batch_texts):
-                idx = batch_indices[j]
-                try:
-                    result = self.translator.translate(
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_idx = {}
+                for j, text in enumerate(batch_texts):
+                    idx = batch_indices[j]
+                    future_to_idx[executor.submit(
+                        self.translator.translate,
                         text,
                         target_lang=target_lang,
                         source_lang=source_lang
-                    )
-                    if result.success and result.text:
-                        translations[idx] = result.text
-                        print(f"   ✓ Block {idx+1} çevrildi")
-                except Exception as e:
-                    print(f"   ⚠️ Block {idx+1} hatası: {str(e)[:50]}")
+                    )] = idx
+
+                for future in as_completed(future_to_idx):
+                    idx = future_to_idx[future]
+                    try:
+                        result = future.result(timeout=45) # Block başına max 45sn
+                        if result.success and result.text:
+                            translations[idx] = result.text
+                            print(f"   ✓ Block {idx+1} çevrildi")
+                    except Exception as e:
+                        print(f"   ⚠️ Block {idx+1} hatası: {str(e)[:50]}")
 
         # 🎨 Rendering phase
         if translations:
