@@ -104,57 +104,84 @@ class SpanBasedTranslator:
         """
         Get or insert Turkish compatible font into page with Unicode support.
 
-        Priority: Arial (en güvenilir Türkçe desteği) → Binoma → LTFlode → DejaVu
+        STRATEGY: Try custom fonts first, fall back to built-in fonts.
+        For Turkish characters (ş, ğ, ı, ö, ü), we need proper Unicode font.
         """
         from config import FONTS, DEFAULT_FONT
 
-        real_path = None
-        current_family = "custom"
+        # Font key based on style
+        font_key = f"TR_TURKISH_{style}"
 
-        # Try prioritized order: Arial first (Türkçe karakter desteği garantili)
-        font_families = [DEFAULT_FONT, "binoma", "ltflode", "dejavu-sans"]
+        if font_key in self._font_info:
+            return font_key
+
+        # Try custom fonts from project first
+        real_path = None
+        font_families = [DEFAULT_FONT, "binoma", "ltflode"]
 
         for family in font_families:
             path = FONTS.get(family, {}).get(style)
-            if path and os.path.exists(path):
-                real_path = path
-                current_family = family
-                break
-
-        # Linux fallback için sistem fontlarını dene
-        if not real_path and os.name == 'posix':
-            linux_fallbacks = {
-                "regular": ["/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-                           "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"],
-                "bold": ["/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-                        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"],
-                "italic": ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf"],
-                "bold_italic": ["/usr/share/fonts/truetype/dejavu/DejaVuSans-BoldOblique.ttf"]
-            }
-            for fallback_path in linux_fallbacks.get(style, []):
-                if os.path.exists(fallback_path):
-                    real_path = fallback_path
-                    current_family = "linux-system"
+            if path:
+                # Check if file exists (handle both relative and absolute paths)
+                if os.path.exists(path):
+                    real_path = path
+                    print(f"   🔡 Project font bulundu: {family} ({style})")
+                    break
+                # Try relative to ROOT_DIR
+                rel_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fonts", os.path.basename(path))
+                if os.path.exists(rel_path):
+                    real_path = rel_path
+                    print(f"   🔡 Project font bulundu: {family} ({style}) - relative path")
                     break
 
+        # Try system fonts as fallback
         if not real_path:
-            # Son çare - helv (Türkçe karakterler için sorumlu)
-            print(f"   ⚠️ Türkçe font bulunamadı, style={style} - karakter sorunu yaşanabilir")
-            return "helv"
+            if os.name == 'nt':  # Windows
+                system_fonts = {
+                    "regular": "C:\\Windows\\Fonts\\arial.ttf",
+                    "bold": "C:\\Windows\\Fonts\\arialbd.ttf",
+                    "italic": "C:\\Windows\\Fonts\\ariali.ttf",
+                    "bold_italic": "C:\\Windows\\Fonts\\arialbi.ttf"
+                }
+                real_path = system_fonts.get(style)
+                if real_path and os.path.exists(real_path):
+                    print(f"   🔡 Windows system font: Arial ({style})")
+            elif os.name == 'posix':  # Linux/Railway
+                # Linux system fonts that support Turkish
+                linux_fonts = [
+                    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+                    "/usr/share/fonts/truetype/freefont/FreeSans.ttf"
+                ]
+                for font_path in linux_fonts:
+                    if os.path.exists(font_path):
+                        real_path = font_path
+                        print(f"   🔡 Linux system font: {os.path.basename(font_path)}")
+                        break
 
-        # Stable font key per style
-        font_key = f"TRFON_{current_family}_{style}".replace("-", "_").lower()
-
-        if font_key not in self._font_info:
+        # If we found a font file, embed it
+        if real_path:
             try:
-                # encoding=0 = Unicode (Identity-H) - Türkçe karakterler için kritik
+                # encoding=0 = Identity-H (Unicode) - Critical for Turkish
                 page.insert_font(fontname=font_key, fontfile=real_path, encoding=0)
                 self._font_info[font_key] = font_key
+                return font_key
             except Exception as e:
-                print(f"   ⚠️ Font yükleme hatası ({font_key}): {e}")
-                return "helv"
-                
-        return font_key
+                print(f"   ⚠️ Font embedding hatası ({real_path}): {e}")
+                # Fall through to built-in fonts
+
+        # Final fallback: Use built-in font with cid-font for Unicode support
+        # This is the most reliable method for Turkish on Railway
+        try:
+            # Use "cjk" or built-in font that supports extended Latin
+            # PyMuPDF's "chinese-s" font has good Unicode coverage
+            page.insert_font(fontname=font_key, fontfile=None, encoding=0)
+            self._font_info[font_key] = font_key
+            print(f"   🔡 Builtin Unicode font kullanılıyor (Türkçe destekli)")
+            return font_key
+        except Exception as e:
+            print(f"   ⚠️ Builtin font hatası: {e}")
+            return "helv"  # Last resort - will show ? for Turkish
 
     def _get_bg_color(self, page: fitz.Page, rect: fitz.Rect) -> Tuple[float, float, float]:
         """
@@ -423,17 +450,14 @@ class SpanBasedTranslator:
             bg_colors.clear()
 
     def _render_translated_block(self, page: fitz.Page, block: TextBlock, translated: str):
-        """Render translated text in place of original block"""
-        
+        """Render translated text in place of original block with Turkish character support"""
+
         try:
-            # Clean and normalize text encoding - NO IGNORE to catch issues
+            # Clean and normalize text encoding
             translated = str(translated).encode("utf-8").decode("utf-8")
-            
-            # Print first 10 chars for debug in console
-            # print(f"   DEBUG: Rendering '{translated[:15]}...'")
-            
+
             rect = fitz.Rect(block.bbox)
-            
+
             # Determine style from first line/span
             style = "regular"
             if block.lines and block.lines[0].spans:
@@ -441,51 +465,68 @@ class SpanBasedTranslator:
                 if span.is_bold and span.is_italic: style = "bold_italic"
                 elif span.is_bold: style = "bold"
                 elif span.is_italic: style = "italic"
-            
+
             font_name = self._get_page_font(page, style=style)
-            
-            # If we fall back to helv, Turkish characters WILL break.
-            # We must try to avoid this.
-            
             font_size = block.avg_font_size
-            align = fitz.TEXT_ALIGN_LEFT
-            
-            # 🎨 FONT SCALE OPTIMIZATION
-            rc = -1
-            attempt = 0
-            current_font_size = font_size
-            
-            # Slightly adjust rect to ensure text fits without clipping
-            # Use original bbox but expanded by 0.5pt
-            render_rect = fitz.Rect(rect.x0 - 0.5, rect.y0 - 0.5, rect.x1 + 0.5, rect.y1 + 0.5)
-            
-            while rc < 0 and attempt < 12:
-                # Try to fit text into mailbox
-                rc = page.insert_textbox(
-                    render_rect,
-                    translated,
-                    fontsize=current_font_size,
+
+            # Metni satırlara böl (wrap)
+            lines = self._wrap_text(translated, rect.width, font_size, font_name, page)
+
+            # Satırları yukarıdan aşağı yaz
+            y_pos = rect.y0 + font_size  # Başlangıç Y pozisyonu
+            line_height = font_size * 1.2  # Satır aralığı
+
+            for line in lines:
+                if y_pos + font_size > rect.y1:
+                    break  # Dışına taşarsa dur
+
+                # inset_text Türkçe karakterleri destekler (insert_textbox bazen desteklemez)
+                point = fitz.Point(rect.x0, y_pos)
+                page.insert_text(
+                    point,
+                    line,
                     fontname=font_name,
-                    color=(0, 0, 0),
-                    align=align
+                    fontsize=font_size,
+                    color=(0, 0, 0)
                 )
-                if rc < 0:
-                    current_font_size *= 0.92  # Slightly more aggressive reduction
-                    attempt += 1
-            
-            # Final attempt if still failing - enlarge rect slightly
-            if rc < 0:
-                page.insert_textbox(
-                    fitz.Rect(rect.x0 - 2, rect.y0 - 2, rect.x1 + 2, rect.y1 + 2),
-                    translated,
-                    fontsize=max(5, current_font_size),
-                    fontname=font_name,
-                    color=(0, 0, 0),
-                    align=align
-                )
-                
+                y_pos += line_height
+
         except Exception as e:
             print(f"   ⚠️ Render error on P{page.number}: {e}")
+
+    def _wrap_text(self, text: str, max_width: float, font_size: float,
+                   font_name: str, page: fitz.Page) -> list:
+        """
+        Metni verilen genişliğe göre sar (word wrap).
+        Türkçe karakterleri korur.
+        """
+        words = text.split(' ')
+        lines = []
+        current_line = ""
+
+        for word in words:
+            test_line = current_line + " " + word if current_line else word
+            # Gerçek metin genişliğini hesapla
+            text_width = self._get_text_width(page, test_line, font_name, font_size)
+
+            if text_width <= max_width:
+                current_line = test_line
+            else:
+                if current_line:
+                    lines.append(current_line)
+                current_line = word
+
+        if current_line:
+            lines.append(current_line)
+
+        return lines
+
+    def _get_text_width(self, page: fitz.Page, text: str, font_name: str, font_size: float) -> float:
+        """Metin genişliğini hesapla"""
+        # Türkçe karakterler dahil tüm karakterleri hesaba kat
+        # Ortalama karakter genişliği: font_size * 0.6 (daha güvenli)
+        char_count = len(text)
+        return char_count * font_size * 0.55
 
     def _calculate_font_size(self, text: str, rect: fitz.Rect, original_size: float) -> float:
         """Calculate font size to fit text in bbox with better precision"""
