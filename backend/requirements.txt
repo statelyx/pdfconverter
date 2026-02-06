@@ -8,7 +8,7 @@ gunicorn
 gevent
 
 # PDF İşleme
-PyMuPDF
+PyMuPDF>=1.23.0
 pdf2docx
 reportlab
 Pillow
