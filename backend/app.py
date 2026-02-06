@@ -49,11 +49,15 @@ CORS(app)
 @app.after_request
 def after_request(response):
     # CORS header'ları her zaman gönder - hata durumlarında bile
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
-    response.headers.add('Access-Control-Expose-Headers', 'Content-Disposition')
-    response.headers.add('Access-Control-Max-Age', '3600')
+    origin = request.headers.get('Origin', '*')
+    response.headers.update({
+        'Access-Control-Allow-Origin': origin,
+        'Access-Control-Allow-Headers': 'Content-Type,Authorization,X-Requested-With',
+        'Access-Control-Allow-Methods': 'GET,PUT,POST,DELETE,OPTIONS',
+        'Access-Control-Expose-Headers': 'Content-Disposition',
+        'Access-Control-Allow-Credentials': 'true',
+        'Access-Control-Max-Age': '3600'
+    })
 
     # Timeout durumları için özel header
     if response.status_code >= 500:
