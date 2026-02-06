@@ -319,7 +319,10 @@ class SpanBasedTranslator:
         
         if not block_lines: return None
         
-        return TextBlock(lines=block_lines, bbox=(x0, y0, x1, y1))
+        # Ensure final bbox is a valid 4-tuple
+        final_bbox = (float(x0), float(y0), float(x1), float(y1))
+        
+        return TextBlock(lines=block_lines, bbox=final_bbox)
 
     def _translate_and_render_page(self, page: fitz.Page, blocks: List[TextBlock],
                                    source_lang: str, target_lang: str):

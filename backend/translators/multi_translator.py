@@ -433,27 +433,34 @@ class MultiProviderTranslator:
         
         # Provider'ları sırayla dene
         last_error = None
+        
+        # Eğer hiç aktif provider yoksa (bağımlılık hatası vs), tekrar dene
+        if not self.providers:
+            self.providers = self._init_providers()
+            
         for provider in self.providers:
             if not provider.available:
                 continue
             
             try:
+                # Failover loglama
+                print(f"   🔄 '{provider.name}' üzerinden çeviri deneniyor...")
                 result = provider.translate(text, target_lang, source_lang)
                 
-                if result.success:
+                if result.success and result.text:
                     # Cache'e ekle
                     if self._cache_enabled:
                         self._cache[cache_key] = result.text
                     
-                    print(f"✅ Çeviri ({result.provider}): {text[:30]}... → {result.text[:30]}...")
+                    print(f"   ✅ Başarılı ({result.provider}): {text[:20]}... → {result.text[:20]}...")
                     return result
                 else:
-                    last_error = result.error
-                    print(f"⚠️ {provider.name} başarısız: {result.error}")
+                    last_error = result.error if result.error else "Bilinmeyen hata"
+                    print(f"   ⚠️ {provider.name} başarısız oldu: {last_error}")
                     
             except Exception as e:
                 last_error = str(e)
-                print(f"⚠️ {provider.name} hata: {e}")
+                print(f"   ⚠️ {provider.name} sistem hatası: {e}")
                 continue
         
         # Tüm provider'lar başarısız
