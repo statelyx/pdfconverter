@@ -131,15 +131,15 @@ class SpanBasedTranslator:
         if not real_path or not os.path.exists(real_path):
             return "helv" # Ultimate fallback
             
-        font_key = f"{current_family}_{style}"
+        font_key = f"P{page.number}_{current_family}_{style}"
         if font_key not in self._font_info:
             try:
-                # Use the full path for direct font insertion
+                # Direct insertion into PDF as CID font (automatic for TTF/OTF)
                 font_index = page.insert_font(fontname=font_key, fontfile=real_path)
+                # print(f"   ✓ Font inserted: {font_key} (Index: {font_index})")
                 self._font_info[font_key] = font_key
-                # print(f"   ✓ Font inserted: {font_key}")
             except Exception as e:
-                print(f"   ⚠️ Font insertion error ({font_key}): {e}")
+                print(f"   ⚠️ Font insertion error {font_key}: {e}")
                 return "helv"
                 
         return font_key
@@ -358,6 +358,9 @@ class SpanBasedTranslator:
         """Render translated text in place of original block"""
         
         try:
+            # Clean and normalize text encoding to prevent stray bytes
+            translated = str(translated).encode("utf-8", "ignore").decode("utf-8")
+            
             rect = fitz.Rect(block.bbox)
             
             # Determine style from first line/span
@@ -372,21 +375,20 @@ class SpanBasedTranslator:
             
             # Start with original average font size
             font_size = block.avg_font_size
-            
-            # Calculate alignment (use first line as hint)
             align = fitz.TEXT_ALIGN_LEFT
             
-            # Try to fit text in block bbox
-            # Textbox handles wrapping
+            # 🎨 FONT SCALE OPTIMIZATION
+            # If text is too long, we scale down slowly
             rc = -1
             attempt = 0
-            
-            # Start font size slightly smaller than original to account for Turkish length
             current_font_size = font_size
             
-            while rc < 0 and attempt < 8:
+            # Expand rect slightly (0.5pt) for better fitting
+            render_rect = fitz.Rect(rect.x0 - 0.5, rect.y0 - 0.5, rect.x1 + 0.5, rect.y1 + 0.5)
+            
+            while rc < 0 and attempt < 10:
                 rc = page.insert_textbox(
-                    rect,
+                    render_rect,
                     translated,
                     fontsize=current_font_size,
                     fontname=font_name,
@@ -394,13 +396,13 @@ class SpanBasedTranslator:
                     align=align
                 )
                 if rc < 0:
-                    current_font_size *= 0.95  # Slower reduction for precision
+                    current_font_size *= 0.95  # 5% reduction per step
                     attempt += 1
             
-            # If still not fitting, force it into a slightly expanded box or minimal size
+            # Final attempt with expanded box if still failing
             if rc < 0:
                 page.insert_textbox(
-                    rect,
+                    fitz.Rect(rect.x0 - 1, rect.y0 - 1, rect.x1 + 1, rect.y1 + 1),
                     translated,
                     fontsize=max(5, current_font_size),
                     fontname=font_name,
@@ -409,7 +411,7 @@ class SpanBasedTranslator:
                 )
                 
         except Exception as e:
-            print(f"   ⚠️ Block rendering error: {e}")
+            print(f"   ⚠️ Block rendering error on P{page.number}: {e}")
 
     def _calculate_font_size(self, text: str, rect: fitz.Rect, original_size: float) -> float:
         """Calculate font size to fit text in bbox"""

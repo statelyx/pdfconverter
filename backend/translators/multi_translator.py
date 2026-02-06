@@ -15,6 +15,7 @@ Token Priority: WRITE -> READ -> API_KEY
 
 import os
 import time
+import json
 import requests
 from typing import Optional, List, Dict, Callable
 from dataclasses import dataclass
@@ -144,6 +145,7 @@ class HuggingFaceProvider:
         
         try:
             response = requests.post(api_url, headers=self._get_headers(), json=payload, timeout=self.timeout)
+            response.encoding = 'utf-8' # Force UTF-8 for Turkish characters
             
             # Boş yanıt kontrolü
             if not response.text or len(response.text.strip()) == 0:
@@ -347,7 +349,37 @@ class LibreTranslateProvider:
                 success=False, error=str(e), provider=self.name
             )
 
+class ArgosTranslateProvider:
+    """
+    Argos Translate - Offline, sıfır maliyet çeviri
+    """
+    name = "argos"
+    
+    def __init__(self):
+        self.available = False
+        try:
+            import argostranslate.package
+            import argostranslate.translate
+            self.available = True
+            # print("   ✓ Argos Translate yüklü")
+        except ImportError:
+            # print("   ⚠️ Argos Translate yüklü değil, 'pip install argostranslate' gerekli")
+            pass
 
+    def translate(self, text: str, target_lang: str, source_lang: str = "auto") -> TranslationResult:
+        if not self.available:
+            return TranslationResult(text=text, success=False, error="Argos not installed", provider=self.name)
+        
+        try:
+            import argostranslate.translate
+            src = "en" if source_lang == "auto" else source_lang
+            translated = argostranslate.translate.translate(text, src, target_lang)
+            return TranslationResult(
+                text=translated, source_lang=src, target_lang=target_lang,
+                success=True, provider=self.name
+            )
+        except Exception as e:
+            return TranslationResult(text=text, success=False, error=str(e), provider=self.name)
 
 # ============================================================================
 # ANA TRANSLATOR SINIFI
@@ -390,7 +422,7 @@ class MultiProviderTranslator:
         """Provider'ları öncelik sırasına göre başlat"""
         # MyMemory şu an çalışıyor, onu birincil yapalım
         provider_order = self.config.get("providers", [
-            "mymemory", "huggingface", "lingva", "libretranslate"
+            "mymemory", "huggingface", "lingva", "libretranslate", "argos"
         ])
         
         provider_map = {
@@ -398,6 +430,7 @@ class MultiProviderTranslator:
             "mymemory": MyMemoryProvider,
             "lingva": LingvaProvider,
             "libretranslate": LibreTranslateProvider,
+            "argos": ArgosTranslateProvider
         }
         
         providers = []

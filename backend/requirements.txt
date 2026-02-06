@@ -30,3 +30,5 @@ tqdm
 
 # Yapılandırma
 python-dotenv
+# Offline Çeviri (Sıfır Maliyet)
+argostranslate
