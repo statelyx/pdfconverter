@@ -7,7 +7,7 @@ Railway deploy için optimize edilmiş konfigürasyon
 import os
 
 # Worker timeout - PDF çeviri işlemleri için yeterli süre
-timeout = 300  # 5 dakika
+timeout = 600  # 10 dakika (çok büyük PDF'ler için)
 
 # Worker type - async işlem için gevent
 worker_class = "sync"

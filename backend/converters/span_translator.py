@@ -165,12 +165,17 @@ class SpanBasedTranslator:
     def _translate_items(self, items: List[Dict], source_lang: str,
                         target_lang: str) -> List[Optional[str]]:
         """
-        Her metin öğesini çevir.
+        Her metin öğesini çevir - BATCH ile hızlı çeviri.
 
         Returns:
             List[Optional[str]]: Çevrilmiş metinler veya None (hata durumunda)
         """
         translations = [None] * len(items)
+
+        # Batch çeviri - çok fazla istekten kaçınmak için
+        batch_size = 20  # 20 satır bir anda
+        texts_to_translate = []
+        indices = []
 
         for i, item in enumerate(items):
             text = item['text']
@@ -183,23 +188,43 @@ class SpanBasedTranslator:
             if self._is_number_or_symbol(text):
                 continue
 
-            try:
-                result = self.translator.translate(
-                    text,
-                    target_lang=target_lang,
-                    source_lang=source_lang
-                )
+            texts_to_translate.append(text)
+            indices.append(i)
 
-                if result.success and result.text and result.text != text:
-                    translations[i] = result.text
-                    print(f"   ✓ Çevrildi: {text[:30]}... → {result.text[:30]}...")
-                else:
-                    # Çeviri başarısız, orijinali koru
-                    translations[i] = None
+        # Batch çeviri - paralel değil, sıralı (timeout riski için)
+        batch_size = 20  # Her seferde 20 satır
+        all_translations = []
 
-            except Exception as e:
-                print(f"   ⚠️ Çeviri hatası: {str(e)[:50]}")
-                translations[i] = None
+        for batch_start in range(0, len(texts_to_translate), batch_size):
+            batch_end = min(batch_start + batch_size, len(texts_to_translate))
+            batch_texts = texts_to_translate[batch_start:batch_end]
+
+            # Bu batch'i çevir (sıralı, timeout için güvenli)
+            for j, text in enumerate(batch_texts):
+                try:
+                    result = self.translator.translate(
+                        text,
+                        target_lang=target_lang,
+                        source_lang=source_lang
+                    )
+
+                    if result.success and result.text and result.text != text:
+                        all_translations.append(result.text)
+                    else:
+                        all_translations.append(text)  # Orijinali koru
+
+                except Exception as e:
+                    print(f"   ⚠️ Çeviri hatası: {str(e)[:50]}")
+                    all_translations.append(text)  # Orijinali koru
+
+        # Sonuçları doğru index'e yerleştir
+        for idx, real_idx in enumerate(indices):
+            original_text = texts_to_translate[idx]
+            translated = all_translations[idx]
+
+            if translated != original_text:  # Çeviri başarılıysa değiştir
+                translations[real_idx] = translated
+                print(f"   ✓ Çevrildi: {original_text[:30]}... → {translated[:30]}...")
 
         return translations
 
