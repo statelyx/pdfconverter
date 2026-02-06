@@ -365,23 +365,6 @@ class MultiProviderTranslator:
                 - parallel: Paralel çeviri aktif mi
                 - cache_enabled: Cache aktif mi
         """
-                    provider = provider_map[name]()
-                    providers.append(provider)
-                except Exception as e:
-                    print(f"⚠️ {name} provider başlatılamadı: {e}")
-        
-        return providers
-    
-    def __init__(self, config: Dict = None):
-        """
-        Translator başlat
-        
-        Args:
-            config: Yapılandırma
-                - providers: Provider listesi ["huggingface", "mymemory", "lingva", "libretranslate"]
-                - parallel: Paralel çeviri aktif mi
-                - cache_enabled: Cache aktif mi
-        """
         self.config = config or {}
         self._cache = {}
         self._cache_enabled = self.config.get("cache_enabled", True)
