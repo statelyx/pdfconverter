@@ -62,8 +62,9 @@ def after_request(response):
     return response
 
 # OPTIONS request için özel handler (preflight)
-@app.options('/*')
-def options_handler():
+@app.route('/', defaults={'path': ''}, methods=['OPTIONS'])
+@app.route('/<path:path>', methods=['OPTIONS'])
+def options_handler(path):
     response = jsonify({'status': 'ok'})
     response.headers.add('Access-Control-Allow-Origin', '*')
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
