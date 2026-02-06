@@ -39,7 +39,18 @@ TRANSLATOR_PROVIDER = os.environ.get("TRANSLATOR_PROVIDER", "hf")
 FONT_DIR = os.path.join(BASE_DIR, "fonts")
 ROOT_FONT_DIR = os.path.join(ROOT_DIR, "fonts")
 
+# Platform-specific font paths
+_IS_WINDOWS = os.name == 'nt'
+_IS_LINUX = os.name == 'posix'
+
 FONTS = {
+    # Arial - Türkçe karakter desteği için en güvenilir seçenek
+    "arial": {
+        "regular": "C:\\Windows\\Fonts\\arial.ttf" if _IS_WINDOWS else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "bold": "C:\\Windows\\Fonts\\arialbd.ttf" if _IS_WINDOWS else "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "italic": "C:\\Windows\\Fonts\\ariali.ttf" if _IS_WINDOWS else "/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf",
+        "bold_italic": "C:\\Windows\\Fonts\\arialbi.ttf" if _IS_WINDOWS else "/usr/share/fonts/truetype/dejavu/DejaVuSans-BoldOblique.ttf"
+    },
     "dejavu-sans": {
         "regular": os.path.join(FONT_DIR, "DejaVuSans.ttf"),
         "bold": os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf"),
@@ -67,8 +78,8 @@ FONTS = {
     }
 }
 
-# Varsayılan Font
-DEFAULT_FONT = "binoma"
+# Varsayılan Font - Arial Türkçe karakter desteği için en güvenilir
+DEFAULT_FONT = "arial"
 DEFAULT_FONT_STYLE = "regular"
 
 # Dil Kodları ve İsimleri

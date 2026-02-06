@@ -101,78 +101,55 @@ class SpanBasedTranslator:
         self._font_info = {} # font_name_style -> inserted_font_name
 
     def _get_page_font(self, page: fitz.Page, style: str = "regular"):
-        """Get or insert Turkish compatible font into page with Unicode support"""
+        """
+        Get or insert Turkish compatible font into page with Unicode support.
+
+        Priority: Arial (en güvenilir Türkçe desteği) → Binoma → LTFlode → DejaVu
+        """
         from config import FONTS, DEFAULT_FONT
-        
-        # Priority 1: User provided fonts (Binoma, LTFlode etc)
-        # Priority 2: System fonts (Windows Arial, Linux DejaVu)
-        # Priority 3: Fallback fonts
-        
+
         real_path = None
         current_family = "custom"
-        
-        # Try prioritized order: 1. LTFlode, 2. Binoma, 3. DejaVu, 4. Arial
-        font_families = [DEFAULT_FONT, "ltflode", "binoma", "dejavu-sans"]
-        
+
+        # Try prioritized order: Arial first (Türkçe karakter desteği garantili)
+        font_families = [DEFAULT_FONT, "binoma", "ltflode", "dejavu-sans"]
+
         for family in font_families:
-            if family == "dejavu-sans" and os.name == 'posix':
-                # Try common Linux paths for DejaVu
-                linux_dejavu = {
-                    "regular": "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-                    "bold": "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-                    "italic": "/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf",
-                    "bold_italic": "/usr/share/fonts/truetype/dejavu/DejaVuSans-BoldOblique.ttf"
-                }
-                path = linux_dejavu.get(style)
-                if path and os.path.exists(path):
-                    real_path = path
-                    current_family = "dejavu"
-                    break
-            
             path = FONTS.get(family, {}).get(style)
             if path and os.path.exists(path):
                 real_path = path
                 current_family = family
                 break
-        
-        # Fallback to Windows Fonts for local dev (Windows)
-        if not real_path and os.name == 'nt':
-            windows_fonts = {
-                "regular": "C:\\Windows\\Fonts\\arial.ttf",
-                "bold": "C:\\Windows\\Fonts\\arialbd.ttf",
-                "italic": "C:\\Windows\\Fonts\\ariali.ttf",
-                "bold_italic": "C:\\Windows\\Fonts\\arialbi.ttf"
-            }
-            path = windows_fonts.get(style)
-            if path and os.path.exists(path):
-                real_path = path
-                current_family = "arial"
-        
-        # Last attempt: any font that exists in common linux paths
+
+        # Linux fallback için sistem fontlarını dene
         if not real_path and os.name == 'posix':
-            backups = [
-                "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-                "/usr/share/fonts/truetype/freefont/FreeSans.ttf"
-            ]
-            for b_path in backups:
-                if os.path.exists(b_path):
-                    real_path = b_path
-                    current_family = "system"
+            linux_fallbacks = {
+                "regular": ["/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+                           "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"],
+                "bold": ["/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+                        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"],
+                "italic": ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf"],
+                "bold_italic": ["/usr/share/fonts/truetype/dejavu/DejaVuSans-BoldOblique.ttf"]
+            }
+            for fallback_path in linux_fallbacks.get(style, []):
+                if os.path.exists(fallback_path):
+                    real_path = fallback_path
+                    current_family = "linux-system"
                     break
-            
+
         if not real_path:
-            return "helv" # Final fallback, but will likely fail Turkish
-            
-        # Use a stable font key per style to avoid bloating the PDF
+            # Son çare - helv (Türkçe karakterler için sorumlu)
+            print(f"   ⚠️ Türkçe font bulunamadı, style={style} - karakter sorunu yaşanabilir")
+            return "helv"
+
+        # Stable font key per style
         font_key = f"TRFON_{current_family}_{style}".replace("-", "_").lower()
-        
+
         if font_key not in self._font_info:
             try:
-                # encoding=0 means Unicode (Identity-H)
-                # This is CRITICAL for Turkish characters
+                # encoding=0 = Unicode (Identity-H) - Türkçe karakterler için kritik
                 page.insert_font(fontname=font_key, fontfile=real_path, encoding=0)
                 self._font_info[font_key] = font_key
-                # print(f"   🔡 Font yüklendi: {font_key} ({real_path})")
             except Exception as e:
                 print(f"   ⚠️ Font yükleme hatası ({font_key}): {e}")
                 return "helv"
@@ -229,12 +206,16 @@ class SpanBasedTranslator:
         """
         Translate PDF with PERFECT layout preservation
         """
+        # Font cache'i her doküman başında bir kez reset (global cache stratejisi)
+        self._font_info = {}
+
         # Open PDF
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         total_pages = len(doc)
 
         print(f"📄 SpanBasedTranslator: {total_pages} pages")
         print(f"🌐 Translation: {source_lang} → {target_lang}")
+        print(f"   🔡 Font stratejisi: Global cache (Arial öncelikli)")
 
         # Process each page
         for page_num in range(total_pages):
@@ -244,9 +225,6 @@ class SpanBasedTranslator:
                 progress_callback(page_num + 1, total_pages)
 
             print(f"\n📝 Page {page_num + 1}/{total_pages}")
-
-            # Reset font info for each page to ensure proper insertion if needed
-            self._font_info = {}
 
             # Extract text blocks
             blocks = self._extract_blocks(page)
