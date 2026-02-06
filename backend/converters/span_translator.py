@@ -75,21 +75,38 @@ class SpanBasedTranslator:
 
     def __init__(self):
         self.translator = get_translator()
-        self._font_name = "helv"  # Will use Helvetica (supports Turkish chars in PyMuPDF)
+        self._font_info = {} # font_name_style -> inserted_font_name
+
+    def _get_page_font(self, page: fitz.Page, style: str = "regular"):
+        """Get or insert Turkish compatible font into page"""
+        from core.font_manager import FontManager
+        
+        font_family = "dejavu-sans"
+        
+        # Real path lookup from config
+        from config import FONTS
+        real_path = FONTS.get(font_family, {}).get(style)
+        
+        if not real_path or not os.path.exists(real_path):
+            return "helv" # Fallback
+            
+        font_key = f"{font_family}_{style}"
+        if font_key not in self._font_info:
+            # Insert font into page and get its name
+            try:
+                # page.insert_font supports external ttf files
+                page.insert_font(fontname=font_key, fontfile=real_path)
+                self._font_info[font_key] = font_key
+            except Exception as e:
+                print(f"   ⚠️ Font insertion error: {e}")
+                return "helv"
+                
+        return font_key
 
     def translate_pdf(self, pdf_bytes: bytes, source_lang: str = "auto",
                      target_lang: str = "tr", progress_callback: Callable = None) -> bytes:
         """
         Translate PDF with PERFECT layout preservation
-        
-        Args:
-            pdf_bytes: PDF byte data
-            source_lang: Source language
-            target_lang: Target language
-            progress_callback: Progress callback (page, total)
-            
-        Returns:
-            bytes: Translated PDF
         """
         # Open PDF
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -106,6 +123,9 @@ class SpanBasedTranslator:
                 progress_callback(page_num + 1, total_pages)
             
             print(f"\n📝 Page {page_num + 1}/{total_pages}")
+            
+            # Reset font info for each page to ensure proper insertion if needed
+            self._font_info = {}
             
             # Extract text lines
             lines = self._extract_lines(page)
@@ -181,6 +201,9 @@ class SpanBasedTranslator:
             texts_to_translate.append(original_text)
             line_indices.append(i)
         
+        if not texts_to_translate:
+            return
+
         # Batch çeviri yap - tek seferde tüm metinleri çevir
         print(f"   📦 Batch çeviri: {len(texts_to_translate)} metin")
 
@@ -213,20 +236,35 @@ class SpanBasedTranslator:
                 for future in as_completed(future_to_idx):
                     idx = future_to_idx[future]
                     try:
-                        result = future.result(timeout=10)  # 10sn max per request
+                        result = future.result(timeout=15)
 
-                        if result.success and result.text != text:
+                        if result.success and result.text:
+                            # result.text != text check is sometimes problematic for small changes
                             translations[idx] = result.text
-                            print(f"   ✓ Line {idx+1}: {result.text[:30]}...")
+                            # print(f"   ✓ Line {idx+1}: {result.text[:30]}...")
 
                     except Exception as e:
-                        print(f"   ⚠️ Line {idx+1} timeout/fallback: {e[:50]}...")
+                        print(f"   ⚠️ Line {idx+1} timeout/fallback: {str(e)[:50]}...")
         
-        # Render all translations
-        print(f"   🎨 Rendering {len(translations)} translations...")
-        for idx, translated_text in translations.items():
-            line = lines[idx]
-            self._render_translated_line(page, line, translated_text)
+        # 🎨 Rendering phase
+        if translations:
+            print(f"   🎨 Rendering {len(translations)} translations...")
+            
+            # 1. First, mark ALL areas for redaction
+            for idx in translations.keys():
+                line = lines[idx]
+                rect = fitz.Rect(line.bbox)
+                # Expand slightly to cover anti-aliasing artifacts
+                expanded_rect = fitz.Rect(rect.x0 - 0.5, rect.y0 - 0.5, rect.x1 + 0.5, rect.y1 + 0.5)
+                page.add_redact_annot(expanded_rect, fill=(1, 1, 1))
+            
+            # 2. Apply ALL redactions at once
+            page.apply_redactions()
+            
+            # 3. Insert ALL translated text
+            for idx, translated_text in translations.items():
+                line = lines[idx]
+                self._render_translated_line(page, line, translated_text)
 
     def _render_translated_line(self, page: fitz.Page, line: TextLine, translated: str):
         """Render translated text in place of original line"""
@@ -235,58 +273,57 @@ class SpanBasedTranslator:
             # Use line bbox
             rect = fitz.Rect(line.bbox)
             
-            # Expand rect slightly for redaction coverage
-            expanded_rect = fitz.Rect(
-                rect.x0 - 1,
-                rect.y0 - 1,
-                rect.x1 + 1,
-                rect.y1 + 1
-            )
+            # Determine style
+            style = "regular"
+            if line.spans:
+                first_span = line.spans[0]
+                if first_span.is_bold and first_span.is_italic: style = "bold_italic"
+                elif first_span.is_bold: style = "bold"
+                elif first_span.is_italic: style = "italic"
             
-            # 1. Redact original text (white fill)
-            page.add_redact_annot(expanded_rect, fill=(1, 1, 1))
-            page.apply_redactions()
+            # Get Turkish compatible font
+            font_name = self._get_page_font(page, style=style)
             
             # 2. Calculate optimal font size
-            font_size = self._calculate_font_size(translated, rect, line.avg_font_size)
+            original_size = line.avg_font_size
+            font_size = self._calculate_font_size(translated, rect, original_size)
             
             # 3. Insert translated text
-            # Use first span's origin for positioning
-            if line.spans:
-                origin = line.spans[0].origin
-                text_point = fitz.Point(rect.x0, origin[1])
-            else:
-                text_point = fitz.Point(rect.x0, rect.y1 - font_size * 0.3)
-            
             # Try textbox first (handles wrapping better)
             try:
+                # Textbox is safer for table cells
                 rc = page.insert_textbox(
                     rect,
                     translated,
                     fontsize=font_size,
-                    fontname="helv",
+                    fontname=font_name,
                     color=(0, 0, 0),
                     align=fitz.TEXT_ALIGN_LEFT
                 )
                 
-                # If text didn't fit, try smaller font
+                # If text didn't fit, try even smaller font
                 if rc < 0:
-                    font_size = max(6, font_size * 0.8)
                     page.insert_textbox(
                         rect,
                         translated,
-                        fontsize=font_size,
-                        fontname="helv",
+                        fontsize=max(5, font_size * 0.7),
+                        fontname=font_name,
                         color=(0, 0, 0),
                         align=fitz.TEXT_ALIGN_LEFT
                     )
-            except:
-                # Fallback to simple text insert
+            except Exception as e:
+                # Fallback to simple text insert if textbox fails
+                if line.spans:
+                    origin = line.spans[0].origin
+                    text_point = fitz.Point(rect.x0, origin[1])
+                else:
+                    text_point = fitz.Point(rect.x0, rect.y1 - font_size * 0.2)
+                    
                 page.insert_text(
                     text_point,
                     translated,
                     fontsize=font_size,
-                    fontname="helv",
+                    fontname=font_name,
                     color=(0, 0, 0)
                 )
                 

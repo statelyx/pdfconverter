@@ -42,15 +42,10 @@ from translators.multi_translator import get_translator
 # Flask uygulaması
 app = Flask(__name__)
 
-# CORS - Tüm originlere izin ver (Vercel için gerekli)
-CORS(app, 
-     resources={r"/*": {"origins": "*"}},
-     supports_credentials=True,
-     allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
-     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-     expose_headers=["Content-Disposition"])
+# CORS - Basit yapılandırma (after_request ile detaylandırılacak)
+CORS(app)
 
-# Preflight OPTIONS istekleri için manuel handler
+# Preflight ve tüm yanıtlar için CORS handler
 @app.after_request
 def after_request(response):
     response.headers.add('Access-Control-Allow-Origin', '*')
