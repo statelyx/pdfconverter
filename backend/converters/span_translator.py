@@ -164,13 +164,18 @@ class SpanBasedTranslator:
             return "helv" # Final fallback
             
         # Use a stable font key per style to avoid bloating the PDF
-        font_key = f"TRFON_{current_family}_{style}".replace("-", "_")
+        font_key = f"TRFON_{current_family}_{style}".replace("-", "_").lower()
         
         if font_key not in self._font_info:
             try:
-                # encoding=0 means Unicode
-                page.insert_font(fontname=font_key, fontfile=real_path, encoding=0)
-                self._font_info[font_key] = font_key
+                # encoding=0 means Unicode (Identity-H)
+                # This is CRITICAL for Turkish characters
+                # Only insert if it's a real font file
+                if real_path and os.path.exists(real_path):
+                    page.insert_font(fontname=font_key, fontfile=real_path, encoding=0)
+                    self._font_info[font_key] = font_key
+                else:
+                    return "helv"
             except Exception as e:
                 print(f"   ⚠️ Font insertion error {font_key}: {e}")
                 return "helv"
