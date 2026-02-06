@@ -48,10 +48,26 @@ CORS(app)
 # Preflight ve tüm yanıtlar için CORS handler
 @app.after_request
 def after_request(response):
+    # CORS header'ları her zaman gönder - hata durumlarında bile
     response.headers.add('Access-Control-Allow-Origin', '*')
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
     response.headers.add('Access-Control-Expose-Headers', 'Content-Disposition')
+    response.headers.add('Access-Control-Max-Age', '3600')
+
+    # Timeout durumları için özel header
+    if response.status_code >= 500:
+        response.headers.add('X-Error-Type', 'Server-Timeout' if 'timeout' in str(response.data).lower() else 'Server-Error')
+
+    return response
+
+# OPTIONS request için özel handler (preflight)
+@app.options('/*')
+def options_handler():
+    response = jsonify({'status': 'ok'})
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
     response.headers.add('Access-Control-Max-Age', '3600')
     return response
 

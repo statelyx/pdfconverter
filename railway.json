@@ -12,5 +12,10 @@
         "healthcheckPath": "/health",
         "healthcheckTimeout": 600,
         "healthcheckInterval": 30
+    },
+    "variables": {
+        "GUNICORN_TIMEOUT": "300",
+        "GUNICORN_WORKERS": "1",
+        "MAX_REQUESTS": "100"
     }
 }

@@ -201,7 +201,8 @@ class MyMemoryProvider:
     def __init__(self, email: str = None):
         self.email = email or os.environ.get("MYMEMORY_EMAIL", "")
         self.base_url = "https://api.mymemory.translated.net/get"
-        self.timeout = 3  # 3 saniye - ultra hızlı
+        # Railway ağ gecikmeleri için timeout artırıldı
+        self.timeout = int(os.environ.get("MYMEMORY_TIMEOUT", "10"))
         self.available = True
 
     def translate(self, text: str, target_lang: str, source_lang: str = "auto") -> TranslationResult:
@@ -213,7 +214,7 @@ class MyMemoryProvider:
             params["de"] = self.email
 
         try:
-            # Ultra hızlı request - timeout 3s
+            # Railway için timeout artırıldı
             response = requests.get(self.base_url, params=params, timeout=self.timeout, verify=False)
 
             if response.status_code != 200:
@@ -232,8 +233,14 @@ class MyMemoryProvider:
                 success=True, provider=self.name, confidence=match_quality
             )
 
+        except requests.exceptions.Timeout:
+            # Timeout durumunda orijinal metni dön ama başarıyı false yap
+            return TranslationResult(
+                text=text, source_lang=source_lang, target_lang=target_lang,
+                success=False, error=f"Timeout ({self.timeout}s)", provider=self.name
+            )
         except Exception:
-            # Hata durumunda orijinal metni dön - timeout olmasın
+            # Hata durumunda orijinal metni dön - fallback
             return TranslationResult(
                 text=text, source_lang=source_lang, target_lang=target_lang,
                 success=True, provider=self.name + "-fallback", confidence=0
