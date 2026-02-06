@@ -12,6 +12,7 @@ load_dotenv()
 
 # Base Path
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.dirname(BASE_DIR)
 
 # API Keys - ENV'den al
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
@@ -36,6 +37,8 @@ TRANSLATOR_PROVIDER = os.environ.get("TRANSLATOR_PROVIDER", "hf")
 
 # Font Yolları
 FONT_DIR = os.path.join(BASE_DIR, "fonts")
+ROOT_FONT_DIR = os.path.join(ROOT_DIR, "fonts")
+
 FONTS = {
     "dejavu-sans": {
         "regular": os.path.join(FONT_DIR, "DejaVuSans.ttf"),
@@ -46,11 +49,24 @@ FONTS = {
     "noto-sans": {
         "regular": os.path.join(FONT_DIR, "NotoSans-Regular.ttf"),
         "bold": os.path.join(FONT_DIR, "NotoSans-Bold.ttf")
+    },
+    "ltflode": {
+        "regular": os.path.join(ROOT_FONT_DIR, "LTFlodeNeue-Regular.otf"),
+        "bold": os.path.join(ROOT_FONT_DIR, "LTFlodeNeue-Bold.otf"),
+        "italic": os.path.join(ROOT_FONT_DIR, "LTFlodeNeue-Italic.otf"),
+        "bold_italic": os.path.join(ROOT_FONT_DIR, "LTFlodeNeue-BoldItalic.otf")
+    },
+    "binoma": {
+        "regular": os.path.join(ROOT_FONT_DIR, "Binoma-Regular.ttf"),
+        "bold": os.path.join(ROOT_FONT_DIR, "Binoma-Bold.ttf")
+    },
+    "transfoma": {
+        "regular": os.path.join(ROOT_FONT_DIR, "TransformaSans-Medium.ttf")
     }
 }
 
 # Varsayılan Font
-DEFAULT_FONT = "dejavu-sans"
+DEFAULT_FONT = "ltflode"
 DEFAULT_FONT_STYLE = "regular"
 
 # Dil Kodları ve İsimleri

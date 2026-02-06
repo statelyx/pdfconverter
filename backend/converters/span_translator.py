@@ -102,15 +102,22 @@ class SpanBasedTranslator:
 
     def _get_page_font(self, page: fitz.Page, style: str = "regular"):
         """Get or insert Turkish compatible font into page"""
-        from core.font_manager import FontManager
+        from config import FONTS, DEFAULT_FONT
         
-        font_family = "dejavu-sans"
+        # Try prioritized order: 1. LTFlode, 2. Binoma, 3. DejaVu, 4. Arial
+        font_families = [DEFAULT_FONT, "ltflode", "binoma", "dejavu-sans"]
         
-        # Real path lookup from config
-        from config import FONTS
-        real_path = FONTS.get(font_family, {}).get(style)
+        real_path = None
+        current_family = "ltflode"
         
-        # Fallback to Windows Fonts if missing (for local dev)
+        for family in font_families:
+            path = FONTS.get(family, {}).get(style)
+            if path and os.path.exists(path):
+                real_path = path
+                current_family = family
+                break
+        
+        # Fallback to Windows Fonts for local dev if all above fail
         if not real_path or not os.path.exists(real_path):
             windows_fonts = {
                 "regular": "C:\\Windows\\Fonts\\arial.ttf",
@@ -119,44 +126,67 @@ class SpanBasedTranslator:
                 "bold_italic": "C:\\Windows\\Fonts\\arialbi.ttf"
             }
             real_path = windows_fonts.get(style)
+            current_family = "arial"
             
         if not real_path or not os.path.exists(real_path):
-            return "helv" # Fallback
+            return "helv" # Ultimate fallback
             
-        font_key = f"{style}_{os.path.basename(real_path)}"
+        font_key = f"{current_family}_{style}"
         if font_key not in self._font_info:
             try:
-                page.insert_font(fontname=font_key, fontfile=real_path)
+                # Use the full path for direct font insertion
+                font_index = page.insert_font(fontname=font_key, fontfile=real_path)
                 self._font_info[font_key] = font_key
+                # print(f"   ✓ Font inserted: {font_key}")
             except Exception as e:
-                print(f"   ⚠️ Font insertion error: {e}")
+                print(f"   ⚠️ Font insertion error ({font_key}): {e}")
                 return "helv"
                 
         return font_key
 
-    def _get_bg_color(self, page: fitz.Page, rect: fitz.Rect) -> Optional[Tuple[float, float, float]]:
-        """Sample average background color from rect edges"""
+    def _get_bg_color(self, page: fitz.Page, rect: fitz.Rect) -> Tuple[float, float, float]:
+        """Sample average background color from 4 corner points of the block"""
         try:
             # Clip rect to page boundaries
             clip = rect & page.rect
             if clip.is_empty:
                 return (1, 1, 1)
                 
-            # Take a small pixmap to sample
-            pix = page.get_pixmap(clip=clip, matrix=fitz.Matrix(0.2, 0.2)) # low res for speed
+            # Sample using pixmap at 1:1 scale for accuracy but only at edges
+            # We take 2x2 area at corners
+            pix = page.get_pixmap(clip=clip, colorspace=fitz.csRGB)
             
-            # Sample corner pixels (usually background)
-            if pix.width > 2 and pix.height > 2:
-                # Top-left and bottom-right
-                c1 = pix.pixel(0, 0)
-                c2 = pix.pixel(pix.width-1, pix.height-1)
+            if pix.width < 1 or pix.height < 1:
+                return (1, 1, 1)
                 
-                # Average them and normalize to 0-1
-                r = ((c1[0] + c2[0]) / 2) / 255
-                g = ((c1[1] + c2[1]) / 2) / 255
-                b = ((c1[2] + c2[2]) / 2) / 255
-                return (r, g, b)
-        except:
+            colors = []
+            # 6 Points: 4 Corners + 2 Middle of edges
+            points = [
+                (0, 0), 
+                (pix.width-1, 0), 
+                (0, pix.height-1), 
+                (pix.width-1, pix.height-1),
+                (pix.width//2, 0),
+                (pix.width//2, pix.height-1)
+            ]
+            
+            for px, py in points:
+                try:
+                    c = pix.pixel(px, py)
+                    colors.append(c)
+                except: continue
+                
+            if not colors:
+                return (1, 1, 1)
+                
+            # Average colors
+            avg_r = sum(c[0] for c in colors) / len(colors) / 255
+            avg_g = sum(c[1] for c in colors) / len(colors) / 255
+            avg_b = sum(c[2] for c in colors) / len(colors) / 255
+            
+            return (avg_r, avg_g, avg_b)
+        except Exception as e:
+            # print(f"   Debug BG sample error: {e}")
             pass
         return (1, 1, 1) # White fallback
 
@@ -312,8 +342,9 @@ class SpanBasedTranslator:
                 # Detect background color
                 bg_color = self._get_bg_color(page, rect)
                 
-                # Expand slightly for full coverage
-                expanded_rect = fitz.Rect(rect.x0 - 0.5, rect.y0 - 0.5, rect.x1 + 0.5, rect.y1 + 0.5)
+                # Expand slightly for full coverage - more precision needed here
+                # to avoid leaving borders around text
+                expanded_rect = fitz.Rect(rect.x0 - 0.2, rect.y0 - 0.2, rect.x1 + 0.2, rect.y1 + 0.2)
                 page.add_redact_annot(expanded_rect, fill=bg_color)
             
             page.apply_redactions()
@@ -349,25 +380,29 @@ class SpanBasedTranslator:
             # Textbox handles wrapping
             rc = -1
             attempt = 0
-            while rc < 0 and attempt < 5:
+            
+            # Start font size slightly smaller than original to account for Turkish length
+            current_font_size = font_size
+            
+            while rc < 0 and attempt < 8:
                 rc = page.insert_textbox(
                     rect,
                     translated,
-                    fontsize=font_size,
+                    fontsize=current_font_size,
                     fontname=font_name,
                     color=(0, 0, 0),
                     align=align
                 )
                 if rc < 0:
-                    font_size *= 0.9  # Reduce font size until it fits
+                    current_font_size *= 0.95  # Slower reduction for precision
                     attempt += 1
             
-            # If still not fitting, forced insert
+            # If still not fitting, force it into a slightly expanded box or minimal size
             if rc < 0:
                 page.insert_textbox(
                     rect,
                     translated,
-                    fontsize=max(6, font_size),
+                    fontsize=max(5, current_font_size),
                     fontname=font_name,
                     color=(0, 0, 0),
                     align=align
