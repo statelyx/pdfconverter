@@ -52,13 +52,36 @@ class TextLine:
     
     @property
     def full_text(self) -> str:
-        return "".join(s.text for s in self.spans)
+        # Use a single space instead of empty string for better word separation
+        # but check if text already has spaces
+        text = ""
+        for s in self.spans:
+            text += s.text
+        return text
     
     @property
     def avg_font_size(self) -> float:
         if not self.spans:
             return 10
         return sum(s.font_size for s in self.spans) / len(self.spans)
+
+
+@dataclass
+class TextBlock:
+    """Paragraph of lines"""
+    lines: List[TextLine]
+    bbox: Tuple[float, float, float, float]
+    
+    @property
+    def full_text(self) -> str:
+        # Join lines with space to form a paragraph
+        return " ".join(l.full_text.strip() for l in self.lines if l.full_text.strip())
+    
+    @property
+    def avg_font_size(self) -> float:
+        if not self.lines:
+            return 10
+        return sum(l.avg_font_size for l in self.lines) / len(self.lines)
 
 
 class SpanBasedTranslator:
@@ -87,14 +110,22 @@ class SpanBasedTranslator:
         from config import FONTS
         real_path = FONTS.get(font_family, {}).get(style)
         
+        # Fallback to Windows Fonts if missing (for local dev)
+        if not real_path or not os.path.exists(real_path):
+            windows_fonts = {
+                "regular": "C:\\Windows\\Fonts\\arial.ttf",
+                "bold": "C:\\Windows\\Fonts\\arialbd.ttf",
+                "italic": "C:\\Windows\\Fonts\\ariali.ttf",
+                "bold_italic": "C:\\Windows\\Fonts\\arialbi.ttf"
+            }
+            real_path = windows_fonts.get(style)
+            
         if not real_path or not os.path.exists(real_path):
             return "helv" # Fallback
             
-        font_key = f"{font_family}_{style}"
+        font_key = f"{style}_{os.path.basename(real_path)}"
         if font_key not in self._font_info:
-            # Insert font into page and get its name
             try:
-                # page.insert_font supports external ttf files
                 page.insert_font(fontname=font_key, fontfile=real_path)
                 self._font_info[font_key] = font_key
             except Exception as e:
@@ -102,6 +133,32 @@ class SpanBasedTranslator:
                 return "helv"
                 
         return font_key
+
+    def _get_bg_color(self, page: fitz.Page, rect: fitz.Rect) -> Optional[Tuple[float, float, float]]:
+        """Sample average background color from rect edges"""
+        try:
+            # Clip rect to page boundaries
+            clip = rect & page.rect
+            if clip.is_empty:
+                return (1, 1, 1)
+                
+            # Take a small pixmap to sample
+            pix = page.get_pixmap(clip=clip, matrix=fitz.Matrix(0.2, 0.2)) # low res for speed
+            
+            # Sample corner pixels (usually background)
+            if pix.width > 2 and pix.height > 2:
+                # Top-left and bottom-right
+                c1 = pix.pixel(0, 0)
+                c2 = pix.pixel(pix.width-1, pix.height-1)
+                
+                # Average them and normalize to 0-1
+                r = ((c1[0] + c2[0]) / 2) / 255
+                g = ((c1[1] + c2[1]) / 2) / 255
+                b = ((c1[2] + c2[2]) / 2) / 255
+                return (r, g, b)
+        except:
+            pass
+        return (1, 1, 1) # White fallback
 
     def translate_pdf(self, pdf_bytes: bytes, source_lang: str = "auto",
                      target_lang: str = "tr", progress_callback: Callable = None) -> bytes:
@@ -127,15 +184,15 @@ class SpanBasedTranslator:
             # Reset font info for each page to ensure proper insertion if needed
             self._font_info = {}
             
-            # Extract text lines
-            lines = self._extract_lines(page)
-            print(f"   Found {len(lines)} text lines")
+            # Extract text blocks
+            blocks = self._extract_blocks(page)
+            print(f"   Found {len(blocks)} text blocks")
             
-            if not lines:
+            if not blocks:
                 continue
             
             # Translate and render
-            self._translate_and_render_page(page, lines, source_lang, target_lang)
+            self._translate_and_render_page(page, blocks, source_lang, target_lang)
         
         # Generate output
         result = doc.tobytes(garbage=4, deflate=True, clean=True)
@@ -144,9 +201,9 @@ class SpanBasedTranslator:
         print(f"\n✅ Translation complete!")
         return result
 
-    def _extract_lines(self, page: fitz.Page) -> List[TextLine]:
-        """Extract all text lines from page"""
-        lines = []
+    def _extract_blocks(self, page: fitz.Page) -> List[TextBlock]:
+        """Extract all text blocks from page"""
+        blocks = []
         
         # Get text as dict with full detail
         text_dict = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE | fitz.TEXT_PRESERVE_LIGATURES)
@@ -154,6 +211,9 @@ class SpanBasedTranslator:
         for block in text_dict.get("blocks", []):
             if block.get("type") != 0:  # Only text blocks
                 continue
+            
+            block_lines = []
+            block_bbox = block.get("bbox", (0, 0, 0, 0))
             
             for line in block.get("lines", []):
                 spans = []
@@ -175,20 +235,23 @@ class SpanBasedTranslator:
                     ))
                 
                 if spans:
-                    lines.append(TextLine(spans=spans, bbox=line_bbox))
+                    block_lines.append(TextLine(spans=spans, bbox=line_bbox))
+            
+            if block_lines:
+                blocks.append(TextBlock(lines=block_lines, bbox=block_bbox))
         
-        return lines
+        return blocks
 
-    def _translate_and_render_page(self, page: fitz.Page, lines: List[TextLine],
+    def _translate_and_render_page(self, page: fitz.Page, blocks: List[TextBlock],
                                    source_lang: str, target_lang: str):
-        """Translate all lines and render on page - BATCH VERSION"""
+        """Translate all blocks and render on page"""
         
         # Çevrilecek metinleri topla
         texts_to_translate = []
-        line_indices = []
+        block_indices = []
         
-        for i, line in enumerate(lines):
-            original_text = line.full_text.strip()
+        for i, block in enumerate(blocks):
+            original_text = block.full_text.strip()
             
             # Skip empty or very short text
             if len(original_text) < 2:
@@ -199,31 +262,26 @@ class SpanBasedTranslator:
                 continue
             
             texts_to_translate.append(original_text)
-            line_indices.append(i)
+            block_indices.append(i)
         
         if not texts_to_translate:
             return
 
-        # Batch çeviri yap - tek seferde tüm metinleri çevir
-        print(f"   📦 Batch çeviri: {len(texts_to_translate)} metin")
+        print(f"   📦 Batch çeviri: {len(texts_to_translate)} blok")
 
         translations = {}
-
-        # Paralel çeviri - 3 workers aynı anda
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        batch_size = 10
-        max_workers = 3  # Aynı anda 3 request
+        batch_size = 5
+        max_workers = 3
 
         for batch_start in range(0, len(texts_to_translate), batch_size):
             batch_end = min(batch_start + batch_size, len(texts_to_translate))
             batch_texts = texts_to_translate[batch_start:batch_end]
-            batch_indices = line_indices[batch_start:batch_end]
+            batch_indices = block_indices[batch_start:batch_end]
 
-            # Paralel çeviri
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_idx = {}
-
                 for j, text in enumerate(batch_texts):
                     idx = batch_indices[j]
                     future_to_idx[executor.submit(
@@ -236,99 +294,87 @@ class SpanBasedTranslator:
                 for future in as_completed(future_to_idx):
                     idx = future_to_idx[future]
                     try:
-                        result = future.result(timeout=15)
-
+                        result = future.result(timeout=20)
                         if result.success and result.text:
-                            # result.text != text check is sometimes problematic for small changes
                             translations[idx] = result.text
-                            # print(f"   ✓ Line {idx+1}: {result.text[:30]}...")
-
                     except Exception as e:
-                        print(f"   ⚠️ Line {idx+1} timeout/fallback: {str(e)[:50]}...")
+                        print(f"   ⚠️ Block {idx+1} hatası: {str(e)[:50]}")
         
         # 🎨 Rendering phase
         if translations:
-            print(f"   🎨 Rendering {len(translations)} translations...")
+            print(f"   🎨 Rendering {len(translations)} blocks...")
             
-            # 1. First, mark ALL areas for redaction
+            # 1. Redact ALL blocks first to clear background
             for idx in translations.keys():
-                line = lines[idx]
-                rect = fitz.Rect(line.bbox)
-                # Expand slightly to cover anti-aliasing artifacts
+                block = blocks[idx]
+                rect = fitz.Rect(block.bbox)
+                
+                # Detect background color
+                bg_color = self._get_bg_color(page, rect)
+                
+                # Expand slightly for full coverage
                 expanded_rect = fitz.Rect(rect.x0 - 0.5, rect.y0 - 0.5, rect.x1 + 0.5, rect.y1 + 0.5)
-                page.add_redact_annot(expanded_rect, fill=(1, 1, 1))
+                page.add_redact_annot(expanded_rect, fill=bg_color)
             
-            # 2. Apply ALL redactions at once
             page.apply_redactions()
             
-            # 3. Insert ALL translated text
+            # 2. Insert translated blocks
             for idx, translated_text in translations.items():
-                line = lines[idx]
-                self._render_translated_line(page, line, translated_text)
+                block = blocks[idx]
+                self._render_translated_block(page, block, translated_text)
 
-    def _render_translated_line(self, page: fitz.Page, line: TextLine, translated: str):
-        """Render translated text in place of original line"""
+    def _render_translated_block(self, page: fitz.Page, block: TextBlock, translated: str):
+        """Render translated text in place of original block"""
         
         try:
-            # Use line bbox
-            rect = fitz.Rect(line.bbox)
+            rect = fitz.Rect(block.bbox)
             
-            # Determine style
+            # Determine style from first line/span
             style = "regular"
-            if line.spans:
-                first_span = line.spans[0]
-                if first_span.is_bold and first_span.is_italic: style = "bold_italic"
-                elif first_span.is_bold: style = "bold"
-                elif first_span.is_italic: style = "italic"
+            if block.lines and block.lines[0].spans:
+                span = block.lines[0].spans[0]
+                if span.is_bold and span.is_italic: style = "bold_italic"
+                elif span.is_bold: style = "bold"
+                elif span.is_italic: style = "italic"
             
-            # Get Turkish compatible font
             font_name = self._get_page_font(page, style=style)
             
-            # 2. Calculate optimal font size
-            original_size = line.avg_font_size
-            font_size = self._calculate_font_size(translated, rect, original_size)
+            # Start with original average font size
+            font_size = block.avg_font_size
             
-            # 3. Insert translated text
-            # Try textbox first (handles wrapping better)
-            try:
-                # Textbox is safer for table cells
+            # Calculate alignment (use first line as hint)
+            align = fitz.TEXT_ALIGN_LEFT
+            
+            # Try to fit text in block bbox
+            # Textbox handles wrapping
+            rc = -1
+            attempt = 0
+            while rc < 0 and attempt < 5:
                 rc = page.insert_textbox(
                     rect,
                     translated,
                     fontsize=font_size,
                     fontname=font_name,
                     color=(0, 0, 0),
-                    align=fitz.TEXT_ALIGN_LEFT
+                    align=align
                 )
-                
-                # If text didn't fit, try even smaller font
                 if rc < 0:
-                    page.insert_textbox(
-                        rect,
-                        translated,
-                        fontsize=max(5, font_size * 0.7),
-                        fontname=font_name,
-                        color=(0, 0, 0),
-                        align=fitz.TEXT_ALIGN_LEFT
-                    )
-            except Exception as e:
-                # Fallback to simple text insert if textbox fails
-                if line.spans:
-                    origin = line.spans[0].origin
-                    text_point = fitz.Point(rect.x0, origin[1])
-                else:
-                    text_point = fitz.Point(rect.x0, rect.y1 - font_size * 0.2)
-                    
-                page.insert_text(
-                    text_point,
+                    font_size *= 0.9  # Reduce font size until it fits
+                    attempt += 1
+            
+            # If still not fitting, forced insert
+            if rc < 0:
+                page.insert_textbox(
+                    rect,
                     translated,
-                    fontsize=font_size,
+                    fontsize=max(6, font_size),
                     fontname=font_name,
-                    color=(0, 0, 0)
+                    color=(0, 0, 0),
+                    align=align
                 )
                 
         except Exception as e:
-            print(f"   ⚠️ Render error: {e}")
+            print(f"   ⚠️ Block rendering error: {e}")
 
     def _calculate_font_size(self, text: str, rect: fitz.Rect, original_size: float) -> float:
         """Calculate font size to fit text in bbox"""
