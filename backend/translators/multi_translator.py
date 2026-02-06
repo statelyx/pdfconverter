@@ -201,8 +201,7 @@ class MyMemoryProvider:
     def __init__(self, email: str = None):
         self.email = email or os.environ.get("MYMEMORY_EMAIL", "")
         self.base_url = "https://api.mymemory.translated.net/get"
-        # Railway ağ gecikmeleri için timeout artırıldı
-        self.timeout = int(os.environ.get("MYMEMORY_TIMEOUT", "10"))
+        self.timeout = 3  # 3 saniye - ultra hızlı
         self.available = True
 
     def translate(self, text: str, target_lang: str, source_lang: str = "auto") -> TranslationResult:
@@ -214,7 +213,7 @@ class MyMemoryProvider:
             params["de"] = self.email
 
         try:
-            # Railway için timeout artırıldı
+            # Ultra hızlı request - timeout 3s
             response = requests.get(self.base_url, params=params, timeout=self.timeout, verify=False)
 
             if response.status_code != 200:
@@ -233,14 +232,8 @@ class MyMemoryProvider:
                 success=True, provider=self.name, confidence=match_quality
             )
 
-        except requests.exceptions.Timeout:
-            # Timeout durumunda orijinal metni dön ama başarıyı false yap
-            return TranslationResult(
-                text=text, source_lang=source_lang, target_lang=target_lang,
-                success=False, error=f"Timeout ({self.timeout}s)", provider=self.name
-            )
         except Exception:
-            # Hata durumunda orijinal metni dön - fallback
+            # Hata durumunda orijinal metni dön - timeout olmasın
             return TranslationResult(
                 text=text, source_lang=source_lang, target_lang=target_lang,
                 success=True, provider=self.name + "-fallback", confidence=0
@@ -440,34 +433,27 @@ class MultiProviderTranslator:
         
         # Provider'ları sırayla dene
         last_error = None
-        
-        # Eğer hiç aktif provider yoksa (bağımlılık hatası vs), tekrar dene
-        if not self.providers:
-            self.providers = self._init_providers()
-            
         for provider in self.providers:
             if not provider.available:
                 continue
             
             try:
-                # Failover loglama
-                print(f"   🔄 '{provider.name}' üzerinden çeviri deneniyor...")
                 result = provider.translate(text, target_lang, source_lang)
                 
-                if result.success and result.text:
+                if result.success:
                     # Cache'e ekle
                     if self._cache_enabled:
                         self._cache[cache_key] = result.text
                     
-                    print(f"   ✅ Başarılı ({result.provider}): {text[:20]}... → {result.text[:20]}...")
+                    print(f"✅ Çeviri ({result.provider}): {text[:30]}... → {result.text[:30]}...")
                     return result
                 else:
-                    last_error = result.error if result.error else "Bilinmeyen hata"
-                    print(f"   ⚠️ {provider.name} başarısız oldu: {last_error}")
+                    last_error = result.error
+                    print(f"⚠️ {provider.name} başarısız: {result.error}")
                     
             except Exception as e:
                 last_error = str(e)
-                print(f"   ⚠️ {provider.name} sistem hatası: {e}")
+                print(f"⚠️ {provider.name} hata: {e}")
                 continue
         
         # Tüm provider'lar başarısız

@@ -41,7 +41,6 @@ ROOT_FONT_DIR = os.path.join(ROOT_DIR, "fonts")
 
 # Platform-specific font paths
 _IS_WINDOWS = os.name == 'nt'
-_IS_LINUX = os.name == 'posix'
 
 FONTS = {
     # Arial - Türkçe karakter desteği için en güvenilir seçenek

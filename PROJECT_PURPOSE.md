@@ -16,4 +16,11 @@ Bu proje, PDF işleme, çeviri ve dönüştürme işlemlerini **SIFIR MALİYET**
 - **Dönüşüm**: pdf2docx, reportlab, pandas.
 
 ---
+## 🚫 Kritik Teknik Engeller (ASLA YAPILMAMASI GEREKENLER)
+1. **Flask @app.options**: Flask'ın standart sürümünde bu dekoratör bulunmaz ve sunucunun boot failure (çökme) almasına neden olur. Her zaman `@app.route(..., methods=['OPTIONS'])` kullanın.
+2. **max() Tekli Argüman**: Floatlarda `max(x1)` kullanımı `TypeError: 'float' object is not iterable` hatasına yol açar. Her zaman `max(a, b)` formatında veya liste içindeyse `max([list])` şeklinde kullanın.
+3. **Senkron/Sıralı Çeviri**: Bellek tasarrufu için paralel işlemi (ThreadPool) tamamen kaldırmak Railway'de `WORKER TIMEOUT` hatasına yol açar. Makul bir worker sayısı ile (örn: 5-8) paralel işlem korunmalıdır.
+4. **HTMLBox Çıkmazı**: Standart PDF yerleşimi için `insert_textbox` en güvenilir yoldur; `insert_htmlbox` font ve karakter uyumunda karmaşıklığa yol açabilir.
+
+---
 *Bu dosya projenin ruhunu temsil eder. Senden sonraki oturumlarda projeyi tarayan modeller, bu kuralları (özellikle sıfır maliyet ve kaliteli düzen koruma) baz alarak hareket etmelidir.*
