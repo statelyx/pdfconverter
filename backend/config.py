@@ -58,7 +58,9 @@ FONTS = {
     },
     "binoma": {
         "regular": os.path.join(ROOT_FONT_DIR, "Binoma-Regular.ttf"),
-        "bold": os.path.join(ROOT_FONT_DIR, "Binoma-Bold.ttf")
+        "bold": os.path.join(ROOT_FONT_DIR, "Binoma-Bold.ttf"),
+        "italic": os.path.join(ROOT_FONT_DIR, "Binoma-Regular.ttf"),
+        "bold_italic": os.path.join(ROOT_FONT_DIR, "Binoma-Bold.ttf")
     },
     "transfoma": {
         "regular": os.path.join(ROOT_FONT_DIR, "TransformaSans-Medium.ttf")
@@ -66,7 +68,7 @@ FONTS = {
 }
 
 # Varsayılan Font
-DEFAULT_FONT = "ltflode"
+DEFAULT_FONT = "binoma"
 DEFAULT_FONT_STYLE = "regular"
 
 # Dil Kodları ve İsimleri

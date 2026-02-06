@@ -101,42 +101,75 @@ class SpanBasedTranslator:
         self._font_info = {} # font_name_style -> inserted_font_name
 
     def _get_page_font(self, page: fitz.Page, style: str = "regular"):
-        """Get or insert Turkish compatible font into page"""
+        """Get or insert Turkish compatible font into page with Unicode support"""
         from config import FONTS, DEFAULT_FONT
+        
+        # Priority 1: User provided fonts (Binoma, LTFlode etc)
+        # Priority 2: System fonts (Windows Arial, Linux DejaVu)
+        # Priority 3: Fallback fonts
+        
+        real_path = None
+        current_family = "custom"
         
         # Try prioritized order: 1. LTFlode, 2. Binoma, 3. DejaVu, 4. Arial
         font_families = [DEFAULT_FONT, "ltflode", "binoma", "dejavu-sans"]
         
-        real_path = None
-        current_family = "ltflode"
-        
         for family in font_families:
+            if family == "dejavu-sans" and os.name == 'posix':
+                # Try common Linux paths for DejaVu
+                linux_dejavu = {
+                    "regular": "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                    "bold": "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                    "italic": "/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf",
+                    "bold_italic": "/usr/share/fonts/truetype/dejavu/DejaVuSans-BoldOblique.ttf"
+                }
+                path = linux_dejavu.get(style)
+                if path and os.path.exists(path):
+                    real_path = path
+                    current_family = "dejavu"
+                    break
+            
             path = FONTS.get(family, {}).get(style)
             if path and os.path.exists(path):
                 real_path = path
                 current_family = family
                 break
         
-        # Fallback to Windows Fonts for local dev if all above fail
-        if not real_path or not os.path.exists(real_path):
+        # Fallback to Windows Fonts for local dev (Windows)
+        if not real_path and os.name == 'nt':
             windows_fonts = {
                 "regular": "C:\\Windows\\Fonts\\arial.ttf",
                 "bold": "C:\\Windows\\Fonts\\arialbd.ttf",
                 "italic": "C:\\Windows\\Fonts\\ariali.ttf",
                 "bold_italic": "C:\\Windows\\Fonts\\arialbi.ttf"
             }
-            real_path = windows_fonts.get(style)
-            current_family = "arial"
+            path = windows_fonts.get(style)
+            if path and os.path.exists(path):
+                real_path = path
+                current_family = "arial"
+        
+        # Last attempt: any font that exists in common linux paths
+        if not real_path and os.name == 'posix':
+            backups = [
+                "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+                "/usr/share/fonts/truetype/freefont/FreeSans.ttf"
+            ]
+            for b_path in backups:
+                if os.path.exists(b_path):
+                    real_path = b_path
+                    current_family = "system"
+                    break
             
-        if not real_path or not os.path.exists(real_path):
-            return "helv" # Ultimate fallback
+        if not real_path:
+            return "helv" # Final fallback
             
-        font_key = f"P{page.number}_{current_family}_{style}"
+        # Use a stable font key per style to avoid bloating the PDF
+        font_key = f"TRFON_{current_family}_{style}".replace("-", "_")
+        
         if font_key not in self._font_info:
             try:
-                # Direct insertion into PDF as CID font (automatic for TTF/OTF)
-                font_index = page.insert_font(fontname=font_key, fontfile=real_path)
-                # print(f"   ✓ Font inserted: {font_key} (Index: {font_index})")
+                # encoding=0 means Unicode
+                page.insert_font(fontname=font_key, fontfile=real_path, encoding=0)
                 self._font_info[font_key] = font_key
             except Exception as e:
                 print(f"   ⚠️ Font insertion error {font_key}: {e}")
@@ -145,29 +178,22 @@ class SpanBasedTranslator:
         return font_key
 
     def _get_bg_color(self, page: fitz.Page, rect: fitz.Rect) -> Tuple[float, float, float]:
-        """Sample average background color from 4 corner points of the block"""
+        """Sample average background color with protection against borders"""
         try:
-            # Clip rect to page boundaries
-            clip = rect & page.rect
-            if clip.is_empty:
-                return (1, 1, 1)
-                
-            # Sample using pixmap at 1:1 scale for accuracy but only at edges
-            # We take 2x2 area at corners
-            pix = page.get_pixmap(clip=clip, colorspace=fitz.csRGB)
+            # Shrink sample area slightly to avoid taking border colors
+            sample_rect = fitz.Rect(rect.x0 + 0.5, rect.y0 + 0.5, rect.x1 - 0.5, rect.y1 - 0.5)
+            clip = sample_rect & page.rect
+            if clip.is_empty: return (1, 1, 1)
             
-            if pix.width < 1 or pix.height < 1:
-                return (1, 1, 1)
-                
+            pix = page.get_pixmap(clip=clip, colorspace=fitz.csRGB)
+            if pix.width < 1 or pix.height < 1: return (1, 1, 1)
+            
             colors = []
-            # 6 Points: 4 Corners + 2 Middle of edges
+            # Sample 6 points
             points = [
-                (0, 0), 
-                (pix.width-1, 0), 
-                (0, pix.height-1), 
-                (pix.width-1, pix.height-1),
-                (pix.width//2, 0),
-                (pix.width//2, pix.height-1)
+                (0, 0), (pix.width-1, 0), (0, pix.height-1), 
+                (pix.width-1, pix.height-1), (pix.width//2, pix.height//2),
+                (pix.width//2, 0)
             ]
             
             for px, py in points:
@@ -175,20 +201,16 @@ class SpanBasedTranslator:
                     c = pix.pixel(px, py)
                     colors.append(c)
                 except: continue
-                
-            if not colors:
-                return (1, 1, 1)
-                
-            # Average colors
+            
+            if not colors: return (1, 1, 1)
+            
             avg_r = sum(c[0] for c in colors) / len(colors) / 255
             avg_g = sum(c[1] for c in colors) / len(colors) / 255
             avg_b = sum(c[2] for c in colors) / len(colors) / 255
             
             return (avg_r, avg_g, avg_b)
-        except Exception as e:
-            # print(f"   Debug BG sample error: {e}")
-            pass
-        return (1, 1, 1) # White fallback
+        except:
+            return (1, 1, 1)
 
     def translate_pdf(self, pdf_bytes: bytes, source_lang: str = "auto",
                      target_lang: str = "tr", progress_callback: Callable = None) -> bytes:
@@ -232,45 +254,72 @@ class SpanBasedTranslator:
         return result
 
     def _extract_blocks(self, page: fitz.Page) -> List[TextBlock]:
-        """Extract all text blocks from page"""
+        """Extract text blocks with style sensitivity for better layout preservation"""
         blocks = []
+        text_dict = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
         
-        # Get text as dict with full detail
-        text_dict = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE | fitz.TEXT_PRESERVE_LIGATURES)
-        
-        for block in text_dict.get("blocks", []):
-            if block.get("type") != 0:  # Only text blocks
-                continue
+        for b in text_dict.get("blocks", []):
+            if b.get("type") != 0: continue
             
-            block_lines = []
-            block_bbox = block.get("bbox", (0, 0, 0, 0))
+            # Group lines by style to prevent merging headers with body text
+            current_group = []
+            last_style = None
             
-            for line in block.get("lines", []):
-                spans = []
-                line_bbox = line.get("bbox", (0, 0, 0, 0))
-                
-                for span in line.get("spans", []):
-                    text = span.get("text", "")
-                    if not text:
-                        continue
+            for line in b.get("lines", []):
+                # Sample dominant style (from first span)
+                if line["spans"]:
+                    s = line["spans"][0]
+                    # style = (font_name, font_size_rounded)
+                    style = (s["font"], round(s["size"]))
                     
-                    spans.append(TextSpan(
-                        text=text,
-                        bbox=span.get("bbox", (0, 0, 0, 0)),
-                        font_name=span.get("font", "helv"),
-                        font_size=span.get("size", 10),
-                        color=span.get("color", 0),
-                        flags=span.get("flags", 0),
-                        origin=span.get("origin", (0, 0))
-                    ))
-                
-                if spans:
-                    block_lines.append(TextLine(spans=spans, bbox=line_bbox))
+                    if last_style and style != last_style:
+                        if current_group:
+                            new_block = self._assemble_block(current_group)
+                            if new_block: blocks.append(new_block)
+                            current_group = []
+                    
+                    current_group.append(line)
+                    last_style = style
+                else:
+                    current_group.append(line)
             
-            if block_lines:
-                blocks.append(TextBlock(lines=block_lines, bbox=block_bbox))
-        
+            if current_group:
+                new_block = self._assemble_block(current_group)
+                if new_block: blocks.append(new_block)
+                
         return blocks
+
+    def _assemble_block(self, lines: List[Dict]) -> Optional[TextBlock]:
+        """Convert raw dict lines into a TextBlock object"""
+        if not lines: return None
+        
+        block_lines = []
+        x0, y0, x1, y1 = 9999, 9999, 0, 0
+        
+        for l in lines:
+            spans = []
+            for s in l["spans"]:
+                if not s["text"].strip(): continue
+                spans.append(TextSpan(
+                    text=s["text"],
+                    bbox=s["bbox"],
+                    font_name=s["font"],
+                    font_size=s["size"],
+                    color=s["color"],
+                    flags=s.get("flags", 0),
+                    origin=s.get("origin", (0, 0))
+                ))
+            
+            if spans:
+                block_lines.append(TextLine(spans=spans, bbox=l["bbox"]))
+                x0 = min(x0, l["bbox"][0])
+                y0 = min(y0, l["bbox"][1])
+                x1 = max(x1, l["bbox"][2])
+                y1 = max(l["bbox"][3])
+        
+        if not block_lines: return None
+        
+        return TextBlock(lines=block_lines, bbox=(x0, y0, x1, y1))
 
     def _translate_and_render_page(self, page: fitz.Page, blocks: List[TextBlock],
                                    source_lang: str, target_lang: str):
@@ -358,8 +407,11 @@ class SpanBasedTranslator:
         """Render translated text in place of original block"""
         
         try:
-            # Clean and normalize text encoding to prevent stray bytes
-            translated = str(translated).encode("utf-8", "ignore").decode("utf-8")
+            # Clean and normalize text encoding - NO IGNORE to catch issues
+            translated = str(translated).encode("utf-8").decode("utf-8")
+            
+            # Print first 10 chars for debug in console
+            # print(f"   DEBUG: Rendering '{translated[:15]}...'")
             
             rect = fitz.Rect(block.bbox)
             
@@ -373,20 +425,22 @@ class SpanBasedTranslator:
             
             font_name = self._get_page_font(page, style=style)
             
-            # Start with original average font size
+            # If we fall back to helv, Turkish characters WILL break.
+            # We must try to avoid this.
+            
             font_size = block.avg_font_size
             align = fitz.TEXT_ALIGN_LEFT
             
             # 🎨 FONT SCALE OPTIMIZATION
-            # If text is too long, we scale down slowly
             rc = -1
             attempt = 0
             current_font_size = font_size
             
-            # Expand rect slightly (0.5pt) for better fitting
+            # Slightly adjust rect to ensure text fits without clipping
+            # Use original bbox but expanded by 0.5pt
             render_rect = fitz.Rect(rect.x0 - 0.5, rect.y0 - 0.5, rect.x1 + 0.5, rect.y1 + 0.5)
             
-            while rc < 0 and attempt < 10:
+            while rc < 0 and attempt < 12:
                 rc = page.insert_textbox(
                     render_rect,
                     translated,
@@ -396,13 +450,13 @@ class SpanBasedTranslator:
                     align=align
                 )
                 if rc < 0:
-                    current_font_size *= 0.95  # 5% reduction per step
+                    current_font_size *= 0.93  # Slightly more aggressive reduction
                     attempt += 1
             
-            # Final attempt with expanded box if still failing
+            # Final attempt if still failing
             if rc < 0:
                 page.insert_textbox(
-                    fitz.Rect(rect.x0 - 1, rect.y0 - 1, rect.x1 + 1, rect.y1 + 1),
+                    fitz.Rect(rect.x0 - 2, rect.y0 - 2, rect.x1 + 2, rect.y1 + 2),
                     translated,
                     fontsize=max(5, current_font_size),
                     fontname=font_name,
@@ -411,7 +465,7 @@ class SpanBasedTranslator:
                 )
                 
         except Exception as e:
-            print(f"   ⚠️ Block rendering error on P{page.number}: {e}")
+            print(f"   ⚠️ Render error on P{page.number}: {e}")
 
     def _calculate_font_size(self, text: str, rect: fitz.Rect, original_size: float) -> float:
         """Calculate font size to fit text in bbox"""
