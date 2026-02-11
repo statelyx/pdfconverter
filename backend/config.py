@@ -42,19 +42,35 @@ ROOT_FONT_DIR = os.path.join(ROOT_DIR, "fonts")
 # Platform-specific font paths
 _IS_WINDOWS = os.name == 'nt'
 
+# Linux/Railway'de DejaVu fontlarının olası yolları
+_LINUX_DEJAVU_PATHS = [
+    "/usr/share/fonts/truetype/dejavu",
+    "/usr/share/fonts/dejavu",
+    "/usr/share/fonts/truetype/DejaVu",
+    "/usr/local/share/fonts/dejavu",
+]
+
+def _find_linux_dejavu(filename: str) -> str:
+    """Linux'ta DejaVu font dosyasının gerçek yolunu bul"""
+    for base in _LINUX_DEJAVU_PATHS:
+        full = os.path.join(base, filename)
+        if os.path.exists(full):
+            return full
+    return ""
+
 FONTS = {
-    # Arial - Türkçe karakter desteği için en güvenilir seçenek
+    # Arial (Windows) / DejaVu (Linux) - Türkçe karakter desteği için en güvenilir
     "arial": {
-        "regular": "C:\\Windows\\Fonts\\arial.ttf" if _IS_WINDOWS else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "bold": "C:\\Windows\\Fonts\\arialbd.ttf" if _IS_WINDOWS else "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "italic": "C:\\Windows\\Fonts\\ariali.ttf" if _IS_WINDOWS else "/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf",
-        "bold_italic": "C:\\Windows\\Fonts\\arialbi.ttf" if _IS_WINDOWS else "/usr/share/fonts/truetype/dejavu/DejaVuSans-BoldOblique.ttf"
+        "regular": "C:\\Windows\\Fonts\\arial.ttf" if _IS_WINDOWS else (_find_linux_dejavu("DejaVuSans.ttf") or "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+        "bold": "C:\\Windows\\Fonts\\arialbd.ttf" if _IS_WINDOWS else (_find_linux_dejavu("DejaVuSans-Bold.ttf") or "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+        "italic": "C:\\Windows\\Fonts\\ariali.ttf" if _IS_WINDOWS else (_find_linux_dejavu("DejaVuSans-Oblique.ttf") or "/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf"),
+        "bold_italic": "C:\\Windows\\Fonts\\arialbi.ttf" if _IS_WINDOWS else (_find_linux_dejavu("DejaVuSans-BoldOblique.ttf") or "/usr/share/fonts/truetype/dejavu/DejaVuSans-BoldOblique.ttf")
     },
     "dejavu-sans": {
-        "regular": os.path.join(FONT_DIR, "DejaVuSans.ttf"),
-        "bold": os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf"),
-        "italic": os.path.join(FONT_DIR, "DejaVuSans-Oblique.ttf"),
-        "bold_italic": os.path.join(FONT_DIR, "DejaVuSans-BoldOblique.ttf")
+        "regular": _find_linux_dejavu("DejaVuSans.ttf") or os.path.join(FONT_DIR, "DejaVuSans.ttf"),
+        "bold": _find_linux_dejavu("DejaVuSans-Bold.ttf") or os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf"),
+        "italic": _find_linux_dejavu("DejaVuSans-Oblique.ttf") or os.path.join(FONT_DIR, "DejaVuSans-Oblique.ttf"),
+        "bold_italic": _find_linux_dejavu("DejaVuSans-BoldOblique.ttf") or os.path.join(FONT_DIR, "DejaVuSans-BoldOblique.ttf")
     },
     "noto-sans": {
         "regular": os.path.join(FONT_DIR, "NotoSans-Regular.ttf"),

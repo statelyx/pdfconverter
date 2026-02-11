@@ -98,44 +98,69 @@ class SpanBasedTranslator:
 
     def __init__(self):
         self.translator = get_translator()
-        self._font_info = {} # font_name_style -> inserted_font_name
+        self._font_info = {}  # font_key -> font_path (global cache)
+        self._page_fonts = set()  # fonts already inserted into current page
 
     def _get_page_font(self, page: fitz.Page, style: str = "regular"):
-        """Get or insert Turkish compatible font into page with Unicode support"""
-        from config import FONTS, DEFAULT_FONT
+        """Get or insert Turkish compatible font into page with Unicode support
         
-        # Priority 1: User provided fonts (Binoma, LTFlode etc)
-        # Priority 2: System fonts (Windows Arial, Linux DejaVu)
-        # Priority 3: Fallback fonts
+        Font arama önceliği:
+        1. Varsayılan font ailesi (config'den, genelde arial/dejavu)
+        2. Proje fontları (LTFlode, Binoma — fonts/ dizininde)
+        3. Sistem fontları (Linux DejaVu, Liberation, FreeSans)
+        4. Windows fallback (Arial)
+        5. PyMuPDF yerleşik font (fitz.Font ile — Türkçe destekli)
+        6. Son çare: helv (Türkçe ÇALIŞMAZ)
+        """
+        from config import FONTS, DEFAULT_FONT, ROOT_FONT_DIR
         
         real_path = None
-        current_family = "custom"
+        current_family = "unknown"
         
-        # Try prioritized order: 1. LTFlode, 2. Binoma, 3. DejaVu, 4. Arial
+        # ---- ADIM 1: Config'deki font aileleri ----
         font_families = [DEFAULT_FONT, "ltflode", "binoma", "dejavu-sans"]
+        # Tekrarları kaldır
+        seen = set()
+        unique_families = []
+        for f in font_families:
+            if f not in seen:
+                seen.add(f)
+                unique_families.append(f)
         
-        for family in font_families:
-            if family == "dejavu-sans" and os.name == 'posix':
-                # Try common Linux paths for DejaVu
-                linux_dejavu = {
-                    "regular": "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-                    "bold": "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-                    "italic": "/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf",
-                    "bold_italic": "/usr/share/fonts/truetype/dejavu/DejaVuSans-BoldOblique.ttf"
-                }
-                path = linux_dejavu.get(style)
-                if path and os.path.exists(path):
-                    real_path = path
-                    current_family = "dejavu"
-                    break
-            
+        for family in unique_families:
             path = FONTS.get(family, {}).get(style)
+            if not path:
+                # Stil bulunamadıysa regular'a düş
+                path = FONTS.get(family, {}).get("regular")
             if path and os.path.exists(path):
                 real_path = path
                 current_family = family
                 break
         
-        # Fallback to Windows Fonts for local dev (Windows)
+        # ---- ADIM 2: Linux sistem fontları (ek tarama) ----
+        if not real_path and os.name == 'posix':
+            linux_search_paths = [
+                # DejaVu — en yaygın, Türkçe tam destek
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+                "/usr/share/fonts/truetype/DejaVu/DejaVuSans.ttf",
+                # Liberation — Red Hat/Fedora
+                "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+                "/usr/share/fonts/liberation-sans/LiberationSans-Regular.ttf",
+                # FreeSans
+                "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+                "/usr/share/fonts/gnu-free/FreeSans.ttf",
+                # Noto Sans
+                "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+                "/usr/share/fonts/noto/NotoSans-Regular.ttf",
+            ]
+            for lpath in linux_search_paths:
+                if os.path.exists(lpath):
+                    real_path = lpath
+                    current_family = "system_linux"
+                    break
+        
+        # ---- ADIM 3: Windows fallback ----
         if not real_path and os.name == 'nt':
             windows_fonts = {
                 "regular": "C:\\Windows\\Fonts\\arial.ttf",
@@ -143,43 +168,68 @@ class SpanBasedTranslator:
                 "italic": "C:\\Windows\\Fonts\\ariali.ttf",
                 "bold_italic": "C:\\Windows\\Fonts\\arialbi.ttf"
             }
-            path = windows_fonts.get(style)
+            path = windows_fonts.get(style) or windows_fonts.get("regular")
             if path and os.path.exists(path):
                 real_path = path
-                current_family = "arial"
+                current_family = "arial_win"
         
-        # Last attempt: any font that exists in common linux paths
-        if not real_path and os.name == 'posix':
-            backups = [
-                "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-                "/usr/share/fonts/truetype/freefont/FreeSans.ttf"
-            ]
-            for b_path in backups:
-                if os.path.exists(b_path):
-                    real_path = b_path
-                    current_family = "system"
-                    break
-            
+        # ---- ADIM 4: Proje fonts/ dizininde herhangi bir TTF/OTF ----
         if not real_path:
-            return "helv" # Final fallback
-            
-        # Use a stable font key per style to avoid bloating the PDF
+            for font_dir in [ROOT_FONT_DIR]:
+                if os.path.isdir(font_dir):
+                    for fname in os.listdir(font_dir):
+                        if fname.lower().endswith(('.ttf', '.otf')):
+                            candidate = os.path.join(font_dir, fname)
+                            if os.path.exists(candidate):
+                                real_path = candidate
+                                current_family = "project_font"
+                                print(f"   ℹ️ Proje fontu kullanılıyor: {fname}")
+                                break
+                if real_path:
+                    break
+        
+        # ---- ADIM 5: PyMuPDF yerleşik font (fitz.Font) ----
+        if not real_path:
+            # fitz.Font ile yerleşik bir font oluşturup buffer olarak kullan
+            try:
+                # "notos" = Noto Sans (PyMuPDF yerleşik, Türkçe destekler)
+                builtin_font = fitz.Font("notos")
+                font_buffer = builtin_font.buffer
+                if font_buffer:
+                    font_key = f"TRFON_notos_{style}".lower()
+                    if font_key not in self._page_fonts:
+                        try:
+                            page.insert_font(fontname=font_key, fontbuffer=font_buffer)
+                            self._page_fonts.add(font_key)
+                            self._font_info[font_key] = "(builtin-notos)"
+                            print(f"   ℹ️ PyMuPDF yerleşik 'notos' fontu kullanılıyor")
+                        except Exception as e:
+                            print(f"   ⚠️ Yerleşik font ekleme hatası: {e}")
+                    return font_key
+            except Exception as e:
+                print(f"   ⚠️ fitz.Font('notos') hatası: {e}")
+        
+        # ---- ADIM 6: Hiçbir şey bulunamadı ----
+        if not real_path:
+            print(f"   ❌ HİÇBİR FONT BULUNAMADI! Türkçe karakterler BOZULACAK!")
+            print(f"   ❌ Kontrol: fonts/ dizini, sistem fontları, nixpacks.toml")
+            return "helv"  # Son çare — Türkçe çalışmaz
+        
+        # ---- Font sayfaya ekleme ----
         font_key = f"TRFON_{current_family}_{style}".replace("-", "_").lower()
         
-        if font_key not in self._font_info:
+        # Her sayfada font yeniden eklenmeli (sayfa bazlı kaynak)
+        if font_key not in self._page_fonts:
             try:
-                # encoding=0 means Unicode (Identity-H)
-                # This is CRITICAL for Turkish characters
-                # Only insert if it's a real font file
-                if real_path and os.path.exists(real_path):
-                    page.insert_font(fontname=font_key, fontfile=real_path, encoding=0)
-                    self._font_info[font_key] = font_key
-                else:
-                    return "helv"
+                page.insert_font(fontname=font_key, fontfile=real_path)
+                self._page_fonts.add(font_key)
+                self._font_info[font_key] = real_path
             except Exception as e:
-                print(f"   ⚠️ Font insertion error {font_key}: {e}")
-                return "helv"
-                
+                print(f"   ⚠️ Font ekleme hatası ({font_key}, {real_path}): {e}")
+                # Font zaten sayfada kayıtlı olabilir, yine de dene
+                self._page_fonts.add(font_key)
+                self._font_info[font_key] = real_path
+        
         return font_key
 
     def _get_bg_color(self, page: fitz.Page, rect: fitz.Rect) -> Tuple[float, float, float]:
@@ -238,8 +288,8 @@ class SpanBasedTranslator:
             
             print(f"\n📝 Page {page_num + 1}/{total_pages}")
             
-            # Reset font info for each page to ensure proper insertion if needed
-            self._font_info = {}
+            # Her sayfada fontlar yeniden eklenmeli (page-level resource)
+            self._page_fonts = set()
             
             # Extract text blocks
             blocks = self._extract_blocks(page)
@@ -409,16 +459,21 @@ class SpanBasedTranslator:
                 self._render_translated_block(page, block, translated_text)
 
     def _render_translated_block(self, page: fitz.Page, block: TextBlock, translated: str):
-        """Render translated text in place of original block"""
+        """Render translated text in place of original block
+        
+        Metin sığdırma stratejisi:
+        1. Orijinal bbox + küçük margin ile dene
+        2. Sığmazsa font boyutunu oransal küçült (metin uzunluğuna göre)
+        3. Hâlâ sığmazsa bbox'ı sağa genişlet (sayfa sınırına kadar)
+        4. Son çare: minimum font boyutu ile genişletilmiş bbox
+        """
         
         try:
-            # Clean and normalize text encoding - NO IGNORE to catch issues
+            # Clean and normalize text encoding
             translated = str(translated).encode("utf-8").decode("utf-8")
             
-            # Print first 10 chars for debug in console
-            # print(f"   DEBUG: Rendering '{translated[:15]}...'")
-            
             rect = fitz.Rect(block.bbox)
+            page_rect = page.rect
             
             # Determine style from first line/span
             style = "regular"
@@ -430,22 +485,37 @@ class SpanBasedTranslator:
             
             font_name = self._get_page_font(page, style=style)
             
-            # If we fall back to helv, Turkish characters WILL break.
-            # We must try to avoid this.
+            # helv fallback uyarısı
+            if font_name == "helv":
+                print(f"   ⚠️ UYARI: helv fontu kullanılıyor, Türkçe karakterler bozulacak!")
+                # Regular stil ile tekrar dene
+                if style != "regular":
+                    font_name = self._get_page_font(page, style="regular")
             
             font_size = block.avg_font_size
             align = fitz.TEXT_ALIGN_LEFT
             
-            # 🎨 FONT SCALE OPTIMIZATION
+            # Orijinal metin uzunluğunu hesapla
+            original_text = block.full_text.strip()
+            len_ratio = len(translated) / max(len(original_text), 1)
+            
+            # Çeviri orijinalden uzunsa, font boyutunu önceden küçült
+            current_font_size = font_size
+            if len_ratio > 1.3:
+                # Metin %30+ uzunsa, ön küçültme uygula
+                pre_scale = min(1.0, 1.0 / (len_ratio * 0.85))
+                current_font_size = max(6, font_size * pre_scale)
+            
+            # ---- Render Denemesi 1: Orijinal bbox + küçük margin ----
+            render_rect = fitz.Rect(
+                rect.x0 - 0.3, rect.y0 - 0.3,
+                rect.x1 + 0.3, rect.y1 + 0.3
+            )
+            
             rc = -1
             attempt = 0
-            current_font_size = font_size
             
-            # Slightly adjust rect to ensure text fits without clipping
-            # Use original bbox but expanded by 0.5pt
-            render_rect = fitz.Rect(rect.x0 - 0.5, rect.y0 - 0.5, rect.x1 + 0.5, rect.y1 + 0.5)
-            
-            while rc < 0 and attempt < 12:
+            while rc < 0 and attempt < 8:
                 rc = page.insert_textbox(
                     render_rect,
                     translated,
@@ -455,15 +525,42 @@ class SpanBasedTranslator:
                     align=align
                 )
                 if rc < 0:
-                    current_font_size *= 0.93  # Slightly more aggressive reduction
+                    current_font_size *= 0.90  # %10 küçült
                     attempt += 1
             
-            # Final attempt if still failing
+            # ---- Render Denemesi 2: Bbox genişletme (sağa ve aşağıya) ----
             if rc < 0:
-                page.insert_textbox(
-                    fitz.Rect(rect.x0 - 2, rect.y0 - 2, rect.x1 + 2, rect.y1 + 2),
+                # Sağa doğru genişlet (sayfa kenarına kadar, max 40pt)
+                extra_width = min(40, page_rect.x1 - rect.x1 - 5)
+                # Aşağıya doğru genişlet (max 15pt)
+                extra_height = min(15, page_rect.y1 - rect.y1 - 5)
+                
+                expanded_rect = fitz.Rect(
+                    rect.x0 - 1, rect.y0 - 1,
+                    rect.x1 + max(extra_width, 2), rect.y1 + max(extra_height, 2)
+                )
+                
+                current_font_size = max(5.5, font_size * 0.75)
+                rc = page.insert_textbox(
+                    expanded_rect,
                     translated,
-                    fontsize=max(5, current_font_size),
+                    fontsize=current_font_size,
+                    fontname=font_name,
+                    color=(0, 0, 0),
+                    align=align
+                )
+            
+            # ---- Render Denemesi 3: Son çare — minimum font, en geniş bbox ----
+            if rc < 0:
+                last_rect = fitz.Rect(
+                    rect.x0 - 2, rect.y0 - 2,
+                    min(rect.x1 + 60, page_rect.x1 - 5),
+                    min(rect.y1 + 20, page_rect.y1 - 5)
+                )
+                page.insert_textbox(
+                    last_rect,
+                    translated,
+                    fontsize=max(5, current_font_size * 0.85),
                     fontname=font_name,
                     color=(0, 0, 0),
                     align=align
