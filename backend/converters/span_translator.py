@@ -104,10 +104,18 @@ class SpanBasedTranslator:
         self._turkish_font = True  # Font Türkçe karakter destekliyor mu?
 
     @staticmethod
-    def _transliterate_turkish(text: str) -> str:
-        """Türkçe özel karakterleri ASCII karşılıklarına çevir
-        Font Türkçe karakterleri desteklemediğinde kullanılır
+    def _sanitize_text(text: str) -> str:
+        """Metni font-güvenli ASCII/Latin1'e dönüştür
+        
+        Tüm PDF'ler için geçerli evrensel dönüşüm:
+        - Türkçe özel karakterler (g, s, c, i vb.)
+        - Aksan işaretli harfler (é, è, ê, å, æ, ø vb.)
+        - Özel noktalama (–, —, ‘, ’, “, ” vb.)
+        - Diğer Unicode karakterler
         """
+        import unicodedata
+        
+        # Önce Türkçe özel karakterleri dönüştür
         tr_map = {
             'ı': 'i', 'İ': 'I',
             'ğ': 'g', 'Ğ': 'G',
@@ -115,19 +123,70 @@ class SpanBasedTranslator:
             'ç': 'c', 'Ç': 'C',
             'ö': 'o', 'Ö': 'O',
             'ü': 'u', 'Ü': 'U',
-            # Ek Unicode varyantları
-            '\u0131': 'i',  # LATIN SMALL LETTER DOTLESS I
-            '\u0130': 'I',  # LATIN CAPITAL LETTER I WITH DOT ABOVE
-            '\u011F': 'g',  # LATIN SMALL LETTER G WITH BREVE
-            '\u011E': 'G',  # LATIN CAPITAL LETTER G WITH BREVE
-            '\u015F': 's',  # LATIN SMALL LETTER S WITH CEDILLA
-            '\u015E': 'S',  # LATIN CAPITAL LETTER S WITH CEDILLA
-            '\u00E7': 'c',  # LATIN SMALL LETTER C WITH CEDILLA
-            '\u00C7': 'C',  # LATIN CAPITAL LETTER C WITH CEDILLA
         }
         for tr_char, ascii_char in tr_map.items():
             text = text.replace(tr_char, ascii_char)
-        return text
+        
+        # Özel noktalama ve sembolleri dönüştür
+        punct_map = {
+            '\u2013': '-',   # EN DASH
+            '\u2014': '-',   # EM DASH
+            '\u2018': "'",   # LEFT SINGLE QUOTE
+            '\u2019': "'",   # RIGHT SINGLE QUOTE
+            '\u201c': '"',   # LEFT DOUBLE QUOTE
+            '\u201d': '"',   # RIGHT DOUBLE QUOTE
+            '\u2026': '...',  # ELLIPSIS
+            '\u00ab': '"',   # LEFT GUILLEMET
+            '\u00bb': '"',   # RIGHT GUILLEMET
+            '\u2022': '-',   # BULLET
+            '\u00b7': '.',   # MIDDLE DOT
+            '\u00a0': ' ',   # NON-BREAKING SPACE
+            '\u200b': '',    # ZERO-WIDTH SPACE
+            '\u00ad': '',    # SOFT HYPHEN
+            '\u00b0': 'o',   # DEGREE SIGN
+            '\u00ae': '(R)', # REGISTERED
+            '\u00a9': '(C)', # COPYRIGHT
+            '\u2122': '(TM)',# TRADEMARK
+        }
+        for uni_char, replacement in punct_map.items():
+            text = text.replace(uni_char, replacement)
+        
+        # Aksan işaretli Avrupa harflerini decompose et
+        accent_map = {
+            'à': 'a', 'á': 'a', 'â': 'a', 'ã': 'a', 'ä': 'a', 'å': 'a',
+            'À': 'A', 'Á': 'A', 'Â': 'A', 'Ã': 'A', 'Ä': 'A', 'Å': 'A',
+            'è': 'e', 'é': 'e', 'ê': 'e', 'ë': 'e',
+            'È': 'E', 'É': 'E', 'Ê': 'E', 'Ë': 'E',
+            'ì': 'i', 'í': 'i', 'î': 'i', 'ï': 'i',
+            'Ì': 'I', 'Í': 'I', 'Î': 'I', 'Ï': 'I',
+            'ò': 'o', 'ó': 'o', 'ô': 'o', 'õ': 'o',
+            'Ò': 'O', 'Ó': 'O', 'Ô': 'O', 'Õ': 'O',
+            'ù': 'u', 'ú': 'u', 'û': 'u',
+            'Ù': 'U', 'Ú': 'U', 'Û': 'U',
+            'ñ': 'n', 'Ñ': 'N',
+            'æ': 'ae', 'Æ': 'AE',
+            'ø': 'o', 'Ø': 'O',
+            'ß': 'ss',
+            'œ': 'oe', 'Œ': 'OE',
+        }
+        for acc_char, replacement in accent_map.items():
+            text = text.replace(acc_char, replacement)
+        
+        # Kalan non-ASCII karakterleri temizle
+        # unicodedata.normalize ile decompose edip ASCII olmayan parçaları kaldır
+        cleaned = []
+        for ch in text:
+            if ord(ch) < 128:
+                cleaned.append(ch)
+            else:
+                # NFKD decomposition ile decompose et
+                decomposed = unicodedata.normalize('NFKD', ch)
+                ascii_part = ''.join(c for c in decomposed if ord(c) < 128)
+                if ascii_part:
+                    cleaned.append(ascii_part)
+                # Tamamen dönüştürülemiyorsa atla (boş bırak)
+        
+        return ''.join(cleaned)
 
     def _get_page_font(self, page: fitz.Page, style: str = "regular"):
         """Get or insert Turkish compatible font into page
@@ -254,116 +313,96 @@ class SpanBasedTranslator:
         return "helv"
 
     def _get_bg_color(self, page: fitz.Page, rect: fitz.Rect) -> Tuple[float, float, float]:
-        """Metin bloğunun arka plan rengini algıla
+        """Metin bloğunun arka plan rengini doğru algıla
         
-        Strateji:
-        1. Rect'in DIŞINDA (üst ve alt kenarlarından) örnekle
-        2. Koyu pikselleri (metin/çizgi) filtrele
-        3. En açık/yaygın rengi döndür
+        Strateji: rect'in İÇİNDEN ama köşe bölgelerinden örnekle.
+        Metin pikselleri koyu olacağı için filtrelenir.
+        Tablo çizgileri de filtrelenir.
         """
         try:
-            page_rect = page.rect
+            # Rect'i biraz küçült (tablo çizgilerinden kaçın)
+            inset = 2
+            sample_rect = fitz.Rect(
+                rect.x0 + inset, rect.y0 + inset,
+                rect.x1 - inset, rect.y1 - inset
+            )
+            sample_rect = sample_rect & page.rect
+            if sample_rect.is_empty or sample_rect.width < 3 or sample_rect.height < 3:
+                return (1, 1, 1)
             
-            # Rect'in üstünden ve altından küçük bir şerit örnekle
-            # Bu şeritler metnin dışında olacağı için arka plan rengini verir
-            sample_strips = []
+            pix = page.get_pixmap(clip=sample_rect, colorspace=fitz.csRGB)
+            if pix.width < 2 or pix.height < 2:
+                return (1, 1, 1)
             
-            # Üst kenar şeridi (rect'in 2px üstü)
-            top_strip = fitz.Rect(rect.x0 + 2, rect.y0 - 3, rect.x1 - 2, rect.y0 - 0.5)
-            top_strip = top_strip & page_rect
-            if not top_strip.is_empty and top_strip.width > 1 and top_strip.height > 0.5:
-                sample_strips.append(top_strip)
+            # Köşe ve kenar piksellerini örnekle (metnin olmadığı yerler)
+            w, h = pix.width, pix.height
+            sample_points = [
+                # 4 köşe
+                (0, 0), (w-1, 0), (0, h-1), (w-1, h-1),
+                # Kenar orta noktaları
+                (w//2, 0), (w//2, h-1), (0, h//2), (w-1, h//2),
+                # Köşe yakınları (2px içeride)
+                (min(2, w-1), min(2, h-1)), (max(w-3, 0), min(2, h-1)),
+                (min(2, w-1), max(h-3, 0)), (max(w-3, 0), max(h-3, 0)),
+            ]
             
-            # Alt kenar şeridi (rect'in 2px altı)
-            bottom_strip = fitz.Rect(rect.x0 + 2, rect.y1 + 0.5, rect.x1 - 2, rect.y1 + 3)
-            bottom_strip = bottom_strip & page_rect
-            if not bottom_strip.is_empty and bottom_strip.width > 1 and bottom_strip.height > 0.5:
-                sample_strips.append(bottom_strip)
-            
-            # Sol kenar şeridi
-            left_strip = fitz.Rect(rect.x0 - 3, rect.y0 + 2, rect.x0 - 0.5, rect.y1 - 2)
-            left_strip = left_strip & page_rect
-            if not left_strip.is_empty and left_strip.width > 0.5 and left_strip.height > 1:
-                sample_strips.append(left_strip)
-            
-            # Kenar şeritleri kullanılamıyorsa, rect'in köşelerini örnekle
-            if not sample_strips:
-                # Fallback: rect'in kendisinden örnekle (eski yöntem)
-                shrunk = fitz.Rect(rect.x0 + 1, rect.y0 + 1, rect.x1 - 1, rect.y1 - 1)
-                shrunk = shrunk & page_rect
-                if shrunk.is_empty:
-                    return (1, 1, 1)
-                sample_strips.append(shrunk)
-            
-            # Tüm şeritlerden piksel örnekle
-            all_colors = []
-            for strip in sample_strips:
+            colors = []
+            for px, py in sample_points:
+                px = max(0, min(px, w-1))
+                py = max(0, min(py, h-1))
                 try:
-                    pix = page.get_pixmap(clip=strip, colorspace=fitz.csRGB)
-                    if pix.width < 1 or pix.height < 1:
-                        continue
-                    
-                    # Kenar pikselleri örnekle
-                    sample_points = [
-                        (0, 0), (pix.width - 1, 0),
-                        (0, pix.height - 1), (pix.width - 1, pix.height - 1),
-                        (pix.width // 2, 0), (pix.width // 2, pix.height - 1),
-                        (0, pix.height // 2), (pix.width - 1, pix.height // 2),
-                    ]
-                    
-                    for px, py in sample_points:
-                        px = max(0, min(px, pix.width - 1))
-                        py = max(0, min(py, pix.height - 1))
-                        try:
-                            c = pix.pixel(px, py)
-                            all_colors.append(c)
-                        except:
-                            continue
+                    c = pix.pixel(px, py)
+                    colors.append(c)
                 except:
                     continue
             
-            if not all_colors:
+            if not colors:
                 return (1, 1, 1)
             
-            # Koyu pikselleri filtrele (metin veya çizgi rengi)
-            # Parlaklık < 100 olan pikseller muhtemelen metin/çizgidir
-            light_colors = []
-            for c in all_colors:
+            # Çok koyu pikselleri filtrele (metin rengi genelde RGB < 50)
+            # Ama koyu arka plan olabilir, o yüzden sadece tamamen siyahları filtrele
+            bg_colors = []
+            very_dark_count = 0
+            for c in colors:
                 brightness = (c[0] + c[1] + c[2]) / 3
-                if brightness > 100:  # Açık renkler (arka plan)
-                    light_colors.append(c)
+                if brightness < 30:
+                    very_dark_count += 1
+                else:
+                    bg_colors.append(c)
             
-            # Eğer hiç açık renk yoksa, tüm renkleri kullan
-            colors_to_use = light_colors if light_colors else all_colors
+            # Eğer çoğunluk çok koyuysa, arka plan koyu demektir
+            if very_dark_count > len(colors) * 0.6:
+                # Koyu arka plan - tüm renkleri kullan
+                bg_colors = colors
             
-            # En yaygın rengi bul (kümeleme)
-            # Renkleri 16'lık gruplara böl (quantize)
+            if not bg_colors:
+                bg_colors = colors
+            
+            # En yaygın rengi bul (32'lik gruplar)
             color_groups = {}
-            for c in colors_to_use:
-                key = (c[0] // 16 * 16, c[1] // 16 * 16, c[2] // 16 * 16)
+            for c in bg_colors:
+                key = (c[0] // 32 * 32, c[1] // 32 * 32, c[2] // 32 * 32)
                 color_groups[key] = color_groups.get(key, 0) + 1
             
-            # En yaygın renk grubunu seç
             if color_groups:
                 dominant = max(color_groups, key=color_groups.get)
-                # O gruptaki gerçek renklerin ortalamasını al
-                group_colors = [c for c in colors_to_use 
-                              if abs(c[0] - dominant[0]) < 20 
-                              and abs(c[1] - dominant[1]) < 20 
-                              and abs(c[2] - dominant[2]) < 20]
-                
-                if group_colors:
-                    avg_r = sum(c[0] for c in group_colors) / len(group_colors) / 255
-                    avg_g = sum(c[1] for c in group_colors) / len(group_colors) / 255
-                    avg_b = sum(c[2] for c in group_colors) / len(group_colors) / 255
-                    return (avg_r, avg_g, avg_b)
+                group = [c for c in bg_colors
+                         if abs(c[0] - dominant[0]) < 40
+                         and abs(c[1] - dominant[1]) < 40
+                         and abs(c[2] - dominant[2]) < 40]
+                if group:
+                    return (
+                        sum(c[0] for c in group) / len(group) / 255,
+                        sum(c[1] for c in group) / len(group) / 255,
+                        sum(c[2] for c in group) / len(group) / 255
+                    )
             
-            # Fallback: basit ortalama
-            avg_r = sum(c[0] for c in colors_to_use) / len(colors_to_use) / 255
-            avg_g = sum(c[1] for c in colors_to_use) / len(colors_to_use) / 255
-            avg_b = sum(c[2] for c in colors_to_use) / len(colors_to_use) / 255
-            return (avg_r, avg_g, avg_b)
-            
+            # Fallback: ortalama
+            return (
+                sum(c[0] for c in bg_colors) / len(bg_colors) / 255,
+                sum(c[1] for c in bg_colors) / len(bg_colors) / 255,
+                sum(c[2] for c in bg_colors) / len(bg_colors) / 255
+            )
         except:
             return (1, 1, 1)
 
@@ -579,7 +618,7 @@ class SpanBasedTranslator:
             
             # Transliterasyonu HER ZAMAN uygula — güvenlik garantisi
             # notos font bile bazı Türkçe harfleri render edemeyebilir
-            translated = self._transliterate_turkish(translated)
+            translated = self._sanitize_text(translated)
             
             rect = fitz.Rect(block.bbox)
             page_rect = page.rect
@@ -647,10 +686,10 @@ class SpanBasedTranslator:
                 pre_scale = min(1.0, 1.0 / (len_ratio * 0.85))
                 current_font_size = max(6, font_size * pre_scale)
             
-            # ---- Render Denemesi 1: Orijinal bbox + küçük margin ----
+            # ---- Render Denemesi 1: Orijinal bbox (minimal margin) ----
             render_rect = fitz.Rect(
-                rect.x0 - 0.3, rect.y0 - 0.3,
-                rect.x1 + 0.3, rect.y1 + 0.3
+                rect.x0, rect.y0 - 0.2,
+                rect.x1 + 0.2, rect.y1 + 0.2
             )
             
             rc = -1
