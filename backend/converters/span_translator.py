@@ -100,170 +100,270 @@ class SpanBasedTranslator:
         self.translator = get_translator()
         self._font_info = {}  # font_key -> font_path (global cache)
         self._page_fonts = set()  # fonts already inserted into current page
+        self._font_buffer_cache = {}  # font_key -> bytes (font data cache)
+        self._turkish_font = True  # Font Türkçe karakter destekliyor mu?
+
+    @staticmethod
+    def _transliterate_turkish(text: str) -> str:
+        """Türkçe özel karakterleri ASCII karşılıklarına çevir
+        Font Türkçe karakterleri desteklemediğinde kullanılır
+        """
+        tr_map = {
+            'ı': 'i', 'İ': 'I',
+            'ğ': 'g', 'Ğ': 'G',
+            'ş': 's', 'Ş': 'S',
+            'ç': 'c', 'Ç': 'C',
+            'ö': 'o', 'Ö': 'O',
+            'ü': 'u', 'Ü': 'U',
+            # Ek Unicode varyantları
+            '\u0131': 'i',  # LATIN SMALL LETTER DOTLESS I
+            '\u0130': 'I',  # LATIN CAPITAL LETTER I WITH DOT ABOVE
+            '\u011F': 'g',  # LATIN SMALL LETTER G WITH BREVE
+            '\u011E': 'G',  # LATIN CAPITAL LETTER G WITH BREVE
+            '\u015F': 's',  # LATIN SMALL LETTER S WITH CEDILLA
+            '\u015E': 'S',  # LATIN CAPITAL LETTER S WITH CEDILLA
+            '\u00E7': 'c',  # LATIN SMALL LETTER C WITH CEDILLA
+            '\u00C7': 'C',  # LATIN CAPITAL LETTER C WITH CEDILLA
+        }
+        for tr_char, ascii_char in tr_map.items():
+            text = text.replace(tr_char, ascii_char)
+        return text
 
     def _get_page_font(self, page: fitz.Page, style: str = "regular"):
-        """Get or insert Turkish compatible font into page with Unicode support
+        """Get or insert Turkish compatible font into page
         
-        Font arama önceliği:
-        1. Varsayılan font ailesi (config'den, genelde arial/dejavu)
-        2. Proje fontları (LTFlode, Binoma — fonts/ dizininde)
-        3. Sistem fontları (Linux DejaVu, Liberation, FreeSans)
-        4. Windows fallback (Arial)
-        5. PyMuPDF yerleşik font (fitz.Font ile — Türkçe destekli)
-        6. Son çare: helv (Türkçe ÇALIŞMAZ)
+        Strateji: fontbuffer (byte) ile yükle — fontfile'dan daha güvenilir.
+        
+        Öncelik:
+        1. PyMuPDF yerleşik 'notos' (Noto Sans — her yerde çalışır)
+        2. Proje fontları (fonts/ dizini — fontbuffer ile)
+        3. Sistem fontları (DejaVu, Arial — fontbuffer ile)
+        4. Son çare: helv + transliterasyon
         """
         from config import FONTS, DEFAULT_FONT, ROOT_FONT_DIR
         
-        real_path = None
-        current_family = "unknown"
+        # ---- ADIM 1: PyMuPDF yerleşik font (EN GÜVENİLİR) ----
+        # fitz.Font("notos") = Noto Sans, Türkçe dahil 600+ dil desteği
+        # Bu font PyMuPDF ile birlikte gelir, kurulum gerektirmez
+        notos_key = f"TRFON_notos_{style}".lower()
+        if notos_key not in self._page_fonts:
+            try:
+                # fitz.Font ile buffer al
+                if notos_key not in self._font_buffer_cache:
+                    builtin_font = fitz.Font("notos")
+                    buf = builtin_font.buffer
+                    if buf and len(buf) > 100:
+                        self._font_buffer_cache[notos_key] = buf
+                        print(f"   ✅ PyMuPDF 'notos' fontu yüklendi ({len(buf)} bytes)")
+                
+                if notos_key in self._font_buffer_cache:
+                    page.insert_font(
+                        fontname=notos_key,
+                        fontbuffer=self._font_buffer_cache[notos_key]
+                    )
+                    self._page_fonts.add(notos_key)
+                    self._font_info[notos_key] = "(builtin-notos)"
+                    self._turkish_font = True
+                    return notos_key
+            except Exception as e:
+                print(f"   ⚠️ notos font hatası: {e}")
+        else:
+            # Zaten bu sayfada eklendi
+            self._turkish_font = True
+            return notos_key
         
-        # ---- ADIM 1: Config'deki font aileleri ----
+        # ---- ADIM 2: Dosyadan fontbuffer ile yükle ----
+        # Font dosyasını byte olarak okuyup buffer ile ekle (daha güvenilir)
+        font_paths_to_try = []
+        
+        # Config'deki font aileleri
         font_families = [DEFAULT_FONT, "ltflode", "binoma", "dejavu-sans"]
-        # Tekrarları kaldır
         seen = set()
-        unique_families = []
-        for f in font_families:
-            if f not in seen:
-                seen.add(f)
-                unique_families.append(f)
+        for family in font_families:
+            if family in seen:
+                continue
+            seen.add(family)
+            path = FONTS.get(family, {}).get(style) or FONTS.get(family, {}).get("regular")
+            if path:
+                font_paths_to_try.append((family, path))
         
-        for family in unique_families:
-            path = FONTS.get(family, {}).get(style)
-            if not path:
-                # Stil bulunamadıysa regular'a düş
-                path = FONTS.get(family, {}).get("regular")
-            if path and os.path.exists(path):
-                real_path = path
-                current_family = family
-                break
-        
-        # ---- ADIM 2: Linux sistem fontları (ek tarama) ----
-        if not real_path and os.name == 'posix':
-            linux_search_paths = [
-                # DejaVu — en yaygın, Türkçe tam destek
+        # Linux sistem fontları
+        if os.name == 'posix':
+            for lpath in [
                 "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
                 "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-                "/usr/share/fonts/truetype/DejaVu/DejaVuSans.ttf",
-                # Liberation — Red Hat/Fedora
                 "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-                "/usr/share/fonts/liberation-sans/LiberationSans-Regular.ttf",
-                # FreeSans
                 "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
-                "/usr/share/fonts/gnu-free/FreeSans.ttf",
-                # Noto Sans
-                "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-                "/usr/share/fonts/noto/NotoSans-Regular.ttf",
-            ]
-            for lpath in linux_search_paths:
-                if os.path.exists(lpath):
-                    real_path = lpath
-                    current_family = "system_linux"
-                    break
+            ]:
+                font_paths_to_try.append(("system", lpath))
         
-        # ---- ADIM 3: Windows fallback ----
-        if not real_path and os.name == 'nt':
-            windows_fonts = {
-                "regular": "C:\\Windows\\Fonts\\arial.ttf",
-                "bold": "C:\\Windows\\Fonts\\arialbd.ttf",
-                "italic": "C:\\Windows\\Fonts\\ariali.ttf",
-                "bold_italic": "C:\\Windows\\Fonts\\arialbi.ttf"
-            }
-            path = windows_fonts.get(style) or windows_fonts.get("regular")
-            if path and os.path.exists(path):
-                real_path = path
-                current_family = "arial_win"
+        # Windows fontları
+        if os.name == 'nt':
+            win_path = {"regular": "C:\\Windows\\Fonts\\arial.ttf",
+                        "bold": "C:\\Windows\\Fonts\\arialbd.ttf",
+                        "italic": "C:\\Windows\\Fonts\\ariali.ttf"}
+            wp = win_path.get(style) or win_path.get("regular")
+            if wp:
+                font_paths_to_try.append(("arial_win", wp))
         
-        # ---- ADIM 4: Proje fonts/ dizininde herhangi bir TTF/OTF ----
-        if not real_path:
-            for font_dir in [ROOT_FONT_DIR]:
-                if os.path.isdir(font_dir):
-                    for fname in os.listdir(font_dir):
-                        if fname.lower().endswith(('.ttf', '.otf')):
-                            candidate = os.path.join(font_dir, fname)
-                            if os.path.exists(candidate):
-                                real_path = candidate
-                                current_family = "project_font"
-                                print(f"   ℹ️ Proje fontu kullanılıyor: {fname}")
-                                break
-                if real_path:
-                    break
+        # Proje fontları (fonts/ dizini)
+        if os.path.isdir(ROOT_FONT_DIR):
+            for fname in os.listdir(ROOT_FONT_DIR):
+                if fname.lower().endswith(('.ttf', '.otf')):
+                    font_paths_to_try.append(("project", os.path.join(ROOT_FONT_DIR, fname)))
         
-        # ---- ADIM 5: PyMuPDF yerleşik font (fitz.Font) ----
-        if not real_path:
-            # fitz.Font ile yerleşik bir font oluşturup buffer olarak kullan
+        # Hepsini dene
+        for family_name, fpath in font_paths_to_try:
+            if not os.path.exists(fpath):
+                continue
+            
+            font_key = f"TRFON_{family_name}_{style}".replace("-", "_").lower()
+            
+            # Daha önce başarılı şekilde yüklendiyse tekrar kullan
+            if font_key in self._page_fonts:
+                self._turkish_font = True
+                return font_key
+            
             try:
-                # "notos" = Noto Sans (PyMuPDF yerleşik, Türkçe destekler)
-                builtin_font = fitz.Font("notos")
-                font_buffer = builtin_font.buffer
-                if font_buffer:
-                    font_key = f"TRFON_notos_{style}".lower()
-                    if font_key not in self._page_fonts:
-                        try:
-                            page.insert_font(fontname=font_key, fontbuffer=font_buffer)
-                            self._page_fonts.add(font_key)
-                            self._font_info[font_key] = "(builtin-notos)"
-                            print(f"   ℹ️ PyMuPDF yerleşik 'notos' fontu kullanılıyor")
-                        except Exception as e:
-                            print(f"   ⚠️ Yerleşik font ekleme hatası: {e}")
-                    return font_key
-            except Exception as e:
-                print(f"   ⚠️ fitz.Font('notos') hatası: {e}")
-        
-        # ---- ADIM 6: Hiçbir şey bulunamadı ----
-        if not real_path:
-            print(f"   ❌ HİÇBİR FONT BULUNAMADI! Türkçe karakterler BOZULACAK!")
-            print(f"   ❌ Kontrol: fonts/ dizini, sistem fontları, nixpacks.toml")
-            return "helv"  # Son çare — Türkçe çalışmaz
-        
-        # ---- Font sayfaya ekleme ----
-        font_key = f"TRFON_{current_family}_{style}".replace("-", "_").lower()
-        
-        # Her sayfada font yeniden eklenmeli (sayfa bazlı kaynak)
-        if font_key not in self._page_fonts:
-            try:
-                page.insert_font(fontname=font_key, fontfile=real_path)
+                # Font dosyasını byte olarak oku
+                if font_key not in self._font_buffer_cache:
+                    with open(fpath, "rb") as f:
+                        font_bytes = f.read()
+                    if len(font_bytes) < 100:
+                        continue
+                    self._font_buffer_cache[font_key] = font_bytes
+                    print(f"   ✅ Font dosyası okundu: {os.path.basename(fpath)} ({len(font_bytes)} bytes)")
+                
+                # fontbuffer ile ekle (fontfile yerine — daha güvenilir)
+                page.insert_font(
+                    fontname=font_key,
+                    fontbuffer=self._font_buffer_cache[font_key]
+                )
                 self._page_fonts.add(font_key)
-                self._font_info[font_key] = real_path
+                self._font_info[font_key] = fpath
+                self._turkish_font = True
+                return font_key
+                
             except Exception as e:
-                print(f"   ⚠️ Font ekleme hatası ({font_key}, {real_path}): {e}")
-                # Font zaten sayfada kayıtlı olabilir, yine de dene
-                self._page_fonts.add(font_key)
-                self._font_info[font_key] = real_path
+                print(f"   ⚠️ Font buffer hatası ({os.path.basename(fpath)}): {e}")
+                continue
         
-        return font_key
+        # ---- ADIM 3: Hiçbir font yüklenemedi ----
+        print(f"   ❌ HİÇBİR FONT YÜKLENEMEDİ — transliterasyon aktif")
+        self._turkish_font = False
+        return "helv"
 
     def _get_bg_color(self, page: fitz.Page, rect: fitz.Rect) -> Tuple[float, float, float]:
-        """Sample average background color with protection against borders"""
+        """Metin bloğunun arka plan rengini algıla
+        
+        Strateji:
+        1. Rect'in DIŞINDA (üst ve alt kenarlarından) örnekle
+        2. Koyu pikselleri (metin/çizgi) filtrele
+        3. En açık/yaygın rengi döndür
+        """
         try:
-            # Shrink sample area slightly to avoid taking border colors
-            sample_rect = fitz.Rect(rect.x0 + 0.5, rect.y0 + 0.5, rect.x1 - 0.5, rect.y1 - 0.5)
-            clip = sample_rect & page.rect
-            if clip.is_empty: return (1, 1, 1)
+            page_rect = page.rect
             
-            pix = page.get_pixmap(clip=clip, colorspace=fitz.csRGB)
-            if pix.width < 1 or pix.height < 1: return (1, 1, 1)
+            # Rect'in üstünden ve altından küçük bir şerit örnekle
+            # Bu şeritler metnin dışında olacağı için arka plan rengini verir
+            sample_strips = []
             
-            colors = []
-            # Sample 6 points
-            points = [
-                (0, 0), (pix.width-1, 0), (0, pix.height-1), 
-                (pix.width-1, pix.height-1), (pix.width//2, pix.height//2),
-                (pix.width//2, 0)
-            ]
+            # Üst kenar şeridi (rect'in 2px üstü)
+            top_strip = fitz.Rect(rect.x0 + 2, rect.y0 - 3, rect.x1 - 2, rect.y0 - 0.5)
+            top_strip = top_strip & page_rect
+            if not top_strip.is_empty and top_strip.width > 1 and top_strip.height > 0.5:
+                sample_strips.append(top_strip)
             
-            for px, py in points:
+            # Alt kenar şeridi (rect'in 2px altı)
+            bottom_strip = fitz.Rect(rect.x0 + 2, rect.y1 + 0.5, rect.x1 - 2, rect.y1 + 3)
+            bottom_strip = bottom_strip & page_rect
+            if not bottom_strip.is_empty and bottom_strip.width > 1 and bottom_strip.height > 0.5:
+                sample_strips.append(bottom_strip)
+            
+            # Sol kenar şeridi
+            left_strip = fitz.Rect(rect.x0 - 3, rect.y0 + 2, rect.x0 - 0.5, rect.y1 - 2)
+            left_strip = left_strip & page_rect
+            if not left_strip.is_empty and left_strip.width > 0.5 and left_strip.height > 1:
+                sample_strips.append(left_strip)
+            
+            # Kenar şeritleri kullanılamıyorsa, rect'in köşelerini örnekle
+            if not sample_strips:
+                # Fallback: rect'in kendisinden örnekle (eski yöntem)
+                shrunk = fitz.Rect(rect.x0 + 1, rect.y0 + 1, rect.x1 - 1, rect.y1 - 1)
+                shrunk = shrunk & page_rect
+                if shrunk.is_empty:
+                    return (1, 1, 1)
+                sample_strips.append(shrunk)
+            
+            # Tüm şeritlerden piksel örnekle
+            all_colors = []
+            for strip in sample_strips:
                 try:
-                    c = pix.pixel(px, py)
-                    colors.append(c)
-                except: continue
+                    pix = page.get_pixmap(clip=strip, colorspace=fitz.csRGB)
+                    if pix.width < 1 or pix.height < 1:
+                        continue
+                    
+                    # Kenar pikselleri örnekle
+                    sample_points = [
+                        (0, 0), (pix.width - 1, 0),
+                        (0, pix.height - 1), (pix.width - 1, pix.height - 1),
+                        (pix.width // 2, 0), (pix.width // 2, pix.height - 1),
+                        (0, pix.height // 2), (pix.width - 1, pix.height // 2),
+                    ]
+                    
+                    for px, py in sample_points:
+                        px = max(0, min(px, pix.width - 1))
+                        py = max(0, min(py, pix.height - 1))
+                        try:
+                            c = pix.pixel(px, py)
+                            all_colors.append(c)
+                        except:
+                            continue
+                except:
+                    continue
             
-            if not colors: return (1, 1, 1)
+            if not all_colors:
+                return (1, 1, 1)
             
-            avg_r = sum(c[0] for c in colors) / len(colors) / 255
-            avg_g = sum(c[1] for c in colors) / len(colors) / 255
-            avg_b = sum(c[2] for c in colors) / len(colors) / 255
+            # Koyu pikselleri filtrele (metin veya çizgi rengi)
+            # Parlaklık < 100 olan pikseller muhtemelen metin/çizgidir
+            light_colors = []
+            for c in all_colors:
+                brightness = (c[0] + c[1] + c[2]) / 3
+                if brightness > 100:  # Açık renkler (arka plan)
+                    light_colors.append(c)
             
+            # Eğer hiç açık renk yoksa, tüm renkleri kullan
+            colors_to_use = light_colors if light_colors else all_colors
+            
+            # En yaygın rengi bul (kümeleme)
+            # Renkleri 16'lık gruplara böl (quantize)
+            color_groups = {}
+            for c in colors_to_use:
+                key = (c[0] // 16 * 16, c[1] // 16 * 16, c[2] // 16 * 16)
+                color_groups[key] = color_groups.get(key, 0) + 1
+            
+            # En yaygın renk grubunu seç
+            if color_groups:
+                dominant = max(color_groups, key=color_groups.get)
+                # O gruptaki gerçek renklerin ortalamasını al
+                group_colors = [c for c in colors_to_use 
+                              if abs(c[0] - dominant[0]) < 20 
+                              and abs(c[1] - dominant[1]) < 20 
+                              and abs(c[2] - dominant[2]) < 20]
+                
+                if group_colors:
+                    avg_r = sum(c[0] for c in group_colors) / len(group_colors) / 255
+                    avg_g = sum(c[1] for c in group_colors) / len(group_colors) / 255
+                    avg_b = sum(c[2] for c in group_colors) / len(group_colors) / 255
+                    return (avg_r, avg_g, avg_b)
+            
+            # Fallback: basit ortalama
+            avg_r = sum(c[0] for c in colors_to_use) / len(colors_to_use) / 255
+            avg_g = sum(c[1] for c in colors_to_use) / len(colors_to_use) / 255
+            avg_b = sum(c[2] for c in colors_to_use) / len(colors_to_use) / 255
             return (avg_r, avg_g, avg_b)
+            
         except:
             return (1, 1, 1)
 
@@ -439,26 +539,28 @@ class SpanBasedTranslator:
             print(f"   🎨 Rendering {len(translations)} blocks...")
             
             # 1. Redact ALL blocks first to clear background
+            bg_colors = {}  # idx -> bg_color (render'da kullanılacak)
             for idx in translations.keys():
                 block = blocks[idx]
                 rect = fitz.Rect(block.bbox)
                 
                 # Detect background color
                 bg_color = self._get_bg_color(page, rect)
+                bg_colors[idx] = bg_color
                 
-                # Expand slightly for full coverage - more precision needed here
-                # to avoid leaving borders around text
+                # Expand slightly for full coverage
                 expanded_rect = fitz.Rect(rect.x0 - 0.2, rect.y0 - 0.2, rect.x1 + 0.2, rect.y1 + 0.2)
                 page.add_redact_annot(expanded_rect, fill=bg_color)
             
-            page.apply_redactions()
+            page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
             
             # 2. Insert translated blocks
             for idx, translated_text in translations.items():
                 block = blocks[idx]
-                self._render_translated_block(page, block, translated_text)
+                bg = bg_colors.get(idx, (1, 1, 1))
+                self._render_translated_block(page, block, translated_text, bg_color=bg)
 
-    def _render_translated_block(self, page: fitz.Page, block: TextBlock, translated: str):
+    def _render_translated_block(self, page: fitz.Page, block: TextBlock, translated: str, bg_color: Tuple[float, float, float] = (1, 1, 1)):
         """Render translated text in place of original block
         
         Metin sığdırma stratejisi:
@@ -466,14 +568,30 @@ class SpanBasedTranslator:
         2. Sığmazsa font boyutunu oransal küçült (metin uzunluğuna göre)
         3. Hâlâ sığmazsa bbox'ı sağa genişlet (sayfa sınırına kadar)
         4. Son çare: minimum font boyutu ile genişletilmiş bbox
+        
+        Koyu arka plan → beyaz metin, açık arka plan → siyah metin
+        Transliterasyon her zaman uygulanır (güvenlik için)
         """
         
         try:
             # Clean and normalize text encoding
             translated = str(translated).encode("utf-8").decode("utf-8")
             
+            # Transliterasyonu HER ZAMAN uygula — güvenlik garantisi
+            # notos font bile bazı Türkçe harfleri render edemeyebilir
+            translated = self._transliterate_turkish(translated)
+            
             rect = fitz.Rect(block.bbox)
             page_rect = page.rect
+            
+            # Arka plan parlaklığına göre metin rengi belirle
+            bg_brightness = (bg_color[0] + bg_color[1] + bg_color[2]) / 3
+            if bg_brightness < 0.45:
+                # Koyu arka plan → beyaz metin
+                text_color = (1, 1, 1)
+            else:
+                # Açık arka plan → siyah metin
+                text_color = (0, 0, 0)
             
             # Determine style from first line/span
             style = "regular"
@@ -485,12 +603,35 @@ class SpanBasedTranslator:
             
             font_name = self._get_page_font(page, style=style)
             
-            # helv fallback uyarısı
-            if font_name == "helv":
-                print(f"   ⚠️ UYARI: helv fontu kullanılıyor, Türkçe karakterler bozulacak!")
-                # Regular stil ile tekrar dene
-                if style != "regular":
-                    font_name = self._get_page_font(page, style="regular")
+            # Orijinal metin rengini span'dan al
+            original_text_color = None
+            if block.lines and block.lines[0].spans:
+                span = block.lines[0].spans[0]
+                # PyMuPDF color int -> RGB tuple
+                c_int = span.color
+                if isinstance(c_int, int):
+                    r = ((c_int >> 16) & 0xFF) / 255.0
+                    g = ((c_int >> 8) & 0xFF) / 255.0
+                    b = (c_int & 0xFF) / 255.0
+                    original_text_color = (r, g, b)
+            
+            # Arka plan parlaklığına göre metin rengi:
+            # 1. Orijinal metin rengi varsa ve arka planla uyumluysa onu kullan
+            # 2. Değilse otomatik (koyu bg -> beyaz, açık bg -> siyah)
+            if original_text_color:
+                # Orijinal rengin arka planla kontrastlı olup olmadığını kontrol et
+                text_brightness = (original_text_color[0] + original_text_color[1] + original_text_color[2]) / 3
+                if bg_brightness < 0.45 and text_brightness < 0.45:
+                    # İkisi de koyu - beyaz kullan
+                    text_color = (1, 1, 1)
+                elif bg_brightness > 0.6 and text_brightness > 0.6:
+                    # İkisi de açık - siyah kullan
+                    text_color = (0, 0, 0)
+                else:
+                    # Kontrast iyi - orijinal rengi kullan
+                    text_color = original_text_color
+            else:
+                text_color = (1, 1, 1) if bg_brightness < 0.45 else (0, 0, 0)
             
             font_size = block.avg_font_size
             align = fitz.TEXT_ALIGN_LEFT
@@ -521,7 +662,7 @@ class SpanBasedTranslator:
                     translated,
                     fontsize=current_font_size,
                     fontname=font_name,
-                    color=(0, 0, 0),
+                    color=text_color,
                     align=align
                 )
                 if rc < 0:
@@ -546,7 +687,7 @@ class SpanBasedTranslator:
                     translated,
                     fontsize=current_font_size,
                     fontname=font_name,
-                    color=(0, 0, 0),
+                    color=text_color,
                     align=align
                 )
             
@@ -562,7 +703,7 @@ class SpanBasedTranslator:
                     translated,
                     fontsize=max(5, current_font_size * 0.85),
                     fontname=font_name,
-                    color=(0, 0, 0),
+                    color=text_color,
                     align=align
                 )
                 
