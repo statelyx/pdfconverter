@@ -625,25 +625,44 @@ class SpanBasedTranslator:
                 style = "italic"
         return style
 
-    def _can_fit_text(self, page: fitz.Page, seg: TextSegment, text: str, min_font_size: float = 6.0) -> bool:
-        """Check if text can fit in segment bbox by shrinking font size"""
+    def _calc_fit(self, page: fitz.Page, seg: TextSegment, text: str,
+                  min_font_size: float = 5.0, min_scale_x: float = 0.70) -> Tuple[bool, float, float]:
+        """Calc fit params (ok, font_size, scale_x) for segment bbox."""
         rect = fitz.Rect(seg.bbox)
         max_width = rect.width
         style = self._segment_style(seg)
         font_name = self._get_page_font(page, style=style)
 
         current_font_size = seg.avg_font_size
+        text_width = None
         for _ in range(12):
             try:
                 text_width = fitz.get_text_length(text, fontname=font_name, fontsize=current_font_size)
             except Exception:
                 text_width = max_width + 1
             if text_width <= max_width:
-                return True
-            current_font_size = max(min_font_size, current_font_size * 0.92)
+                return True, current_font_size, 1.0
             if current_font_size <= min_font_size:
                 break
-        return False
+            current_font_size = max(min_font_size, current_font_size * 0.92)
+
+        # Still not fit: try horizontal squeeze at min font size
+        if text_width is None:
+            return False, current_font_size, 1.0
+
+        try:
+            text_width = fitz.get_text_length(text, fontname=font_name, fontsize=current_font_size)
+        except Exception:
+            text_width = max_width + 1
+
+        if text_width <= max_width:
+            return True, current_font_size, 1.0
+
+        scale_x = max_width / text_width if text_width > 0 else 1.0
+        if scale_x >= min_scale_x:
+            return True, current_font_size, scale_x
+
+        return False, current_font_size, scale_x
 
     def _translate_and_render_page(self, page: fitz.Page, blocks: List[TextBlock],
                                    source_lang: str, target_lang: str):
@@ -705,11 +724,14 @@ class SpanBasedTranslator:
         
         if translations:
             render_translations = {}
+            render_params = {}  # key -> (font_size, scale_x)
             skipped = 0
             for key, translated_text in translations.items():
                 seg = segments_map[key]
-                if self._can_fit_text(page, seg, translated_text):
+                ok, font_size, scale_x = self._calc_fit(page, seg, translated_text)
+                if ok:
                     render_translations[key] = translated_text
+                    render_params[key] = (font_size, scale_x)
                 else:
                     skipped += 1
 
@@ -731,10 +753,16 @@ class SpanBasedTranslator:
             for key, translated_text in render_translations.items():
                 seg = segments_map[key]
                 bg = bg_colors.get(key, (1, 1, 1))
-                self._render_translated_segment(page, seg, translated_text, bg_color=bg)
+                font_size, scale_x = render_params.get(key, (seg.avg_font_size, 1.0))
+                self._render_translated_segment(
+                    page, seg, translated_text, bg_color=bg,
+                    font_size_override=font_size, scale_x=scale_x
+                )
 
     def _render_translated_segment(self, page: fitz.Page, seg: TextSegment, translated: str,
-                                   bg_color: Tuple[float, float, float] = (1, 1, 1)):
+                                   bg_color: Tuple[float, float, float] = (1, 1, 1),
+                                   font_size_override: Optional[float] = None,
+                                   scale_x: float = 1.0):
         """Render translated text in place of original segment (strict bbox, no wrapping)"""
         try:
             translated = str(translated).encode("utf-8").decode("utf-8")
@@ -783,33 +811,27 @@ class SpanBasedTranslator:
                     base_x = rect.x0
                     base_y = rect.y1 - max(1.0, seg.avg_font_size * 0.2)
 
-            # Font boyutunu genişliğe sığdır (tek satır, wrap yok)
-            max_width = rect.width
-            min_font_size = 6
-            current_font_size = seg.avg_font_size
+            current_font_size = font_size_override or seg.avg_font_size
             text_to_draw = translated
-            text_width = None
-            for _ in range(12):
-                try:
-                    text_width = fitz.get_text_length(text_to_draw, fontname=font_name, fontsize=current_font_size)
-                except Exception:
-                    text_width = max_width + 1  # güvenli fallback
-                if text_width <= max_width or current_font_size <= min_font_size:
-                    break
-                current_font_size = max(min_font_size, current_font_size * 0.92)
 
-            # Hâlâ sığmıyorsa orijinal metne dön (layout bozulmasın)
-            if text_width is not None and text_width > max_width and current_font_size <= min_font_size:
-                text_to_draw = self._sanitize_text(seg.text)
-                current_font_size = seg.avg_font_size
-
-            page.insert_text(
-                fitz.Point(base_x, base_y),
-                text_to_draw,
-                fontsize=current_font_size,
-                fontname=font_name,
-                color=text_color
-            )
+            if scale_x and scale_x != 1.0:
+                m = fitz.Matrix(scale_x, 1)
+                page.insert_text(
+                    fitz.Point(base_x, base_y),
+                    text_to_draw,
+                    fontsize=current_font_size,
+                    fontname=font_name,
+                    color=text_color,
+                    morph=(fitz.Point(base_x, base_y), m)
+                )
+            else:
+                page.insert_text(
+                    fitz.Point(base_x, base_y),
+                    text_to_draw,
+                    fontsize=current_font_size,
+                    fontname=font_name,
+                    color=text_color
+                )
         except Exception as e:
             print(f"   ⚠️ Render error on P{page.number}: {e}")
 
