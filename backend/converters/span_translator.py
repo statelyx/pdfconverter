@@ -612,6 +612,39 @@ class SpanBasedTranslator:
         _flush()
         return segments
 
+    def _segment_style(self, seg: TextSegment) -> str:
+        """Determine font style from first span"""
+        style = "regular"
+        if seg.spans:
+            span = seg.spans[0]
+            if span.is_bold and span.is_italic:
+                style = "bold_italic"
+            elif span.is_bold:
+                style = "bold"
+            elif span.is_italic:
+                style = "italic"
+        return style
+
+    def _can_fit_text(self, page: fitz.Page, seg: TextSegment, text: str, min_font_size: float = 6.0) -> bool:
+        """Check if text can fit in segment bbox by shrinking font size"""
+        rect = fitz.Rect(seg.bbox)
+        max_width = rect.width
+        style = self._segment_style(seg)
+        font_name = self._get_page_font(page, style=style)
+
+        current_font_size = seg.avg_font_size
+        for _ in range(12):
+            try:
+                text_width = fitz.get_text_length(text, fontname=font_name, fontsize=current_font_size)
+            except Exception:
+                text_width = max_width + 1
+            if text_width <= max_width:
+                return True
+            current_font_size = max(min_font_size, current_font_size * 0.92)
+            if current_font_size <= min_font_size:
+                break
+        return False
+
     def _translate_and_render_page(self, page: fitz.Page, blocks: List[TextBlock],
                                    source_lang: str, target_lang: str):
         """Translate all segments and render on page (segment-level for strict layout)"""
@@ -671,10 +704,21 @@ class SpanBasedTranslator:
                         print(f"   ⚠️ Segment hatası: {str(e)[:50]}")
         
         if translations:
-            print(f"   🎨 Rendering {len(translations)} segment...")
-            
+            render_translations = {}
+            skipped = 0
+            for key, translated_text in translations.items():
+                seg = segments_map[key]
+                if self._can_fit_text(page, seg, translated_text):
+                    render_translations[key] = translated_text
+                else:
+                    skipped += 1
+
+            print(f"   🎨 Rendering {len(render_translations)} segment...")
+            if skipped:
+                print(f"   ⚠️ Sığmayan segment sayısı: {skipped} (orijinal bırakıldı)")
+
             bg_colors = {}
-            for key in translations.keys():
+            for key in render_translations.keys():
                 seg = segments_map[key]
                 rect = fitz.Rect(seg.bbox)
                 bg_color = self._get_bg_color(page, rect)
@@ -684,7 +728,7 @@ class SpanBasedTranslator:
             
             page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
             
-            for key, translated_text in translations.items():
+            for key, translated_text in render_translations.items():
                 seg = segments_map[key]
                 bg = bg_colors.get(key, (1, 1, 1))
                 self._render_translated_segment(page, seg, translated_text, bg_color=bg)
