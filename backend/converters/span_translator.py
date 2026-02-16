@@ -621,7 +621,7 @@ class SpanBasedTranslator:
 
     def _render_translated_line(self, page: fitz.Page, line: TextLine, translated: str,
                                 bg_color: Tuple[float, float, float] = (1, 1, 1)):
-        """Render translated text in place of original line (strict bbox)"""
+        """Render translated text in place of original line (strict bbox, no wrapping)"""
         try:
             translated = str(translated).encode("utf-8").decode("utf-8")
             # Transliterasyon HER ZAMAN açık
@@ -658,24 +658,36 @@ class SpanBasedTranslator:
                     else:
                         text_color = original_text_color
 
-            font_size = line.avg_font_size
-            align = fitz.TEXT_ALIGN_LEFT
+            # Baseline koordinatları (span origin varsa onu kullan)
+            base_x = rect.x0
+            base_y = rect.y1 - max(1.0, line.avg_font_size * 0.2)
+            if line.spans and line.spans[0].origin:
+                try:
+                    base_x = min(s.origin[0] for s in line.spans if s.origin)
+                    base_y = line.spans[0].origin[1]
+                except Exception:
+                    base_x = rect.x0
+                    base_y = rect.y1 - max(1.0, line.avg_font_size * 0.2)
 
-            current_font_size = font_size
-            rc = -1
-            attempt = 0
-            while rc < 0 and attempt < 10:
-                rc = page.insert_textbox(
-                    rect,
-                    translated,
-                    fontsize=current_font_size,
-                    fontname=font_name,
-                    color=text_color,
-                    align=align
-                )
-                if rc < 0:
-                    current_font_size = max(5, current_font_size * 0.90)
-                    attempt += 1
+            # Font boyutunu genişliğe sığdır (tek satır, wrap yok)
+            max_width = rect.width
+            current_font_size = line.avg_font_size
+            for _ in range(12):
+                try:
+                    text_width = fitz.get_text_length(translated, fontname=font_name, fontsize=current_font_size)
+                except Exception:
+                    text_width = max_width + 1  # güvenli fallback
+                if text_width <= max_width or current_font_size <= 5:
+                    break
+                current_font_size = max(5, current_font_size * 0.92)
+
+            page.insert_text(
+                fitz.Point(base_x, base_y),
+                translated,
+                fontsize=current_font_size,
+                fontname=font_name,
+                color=text_color
+            )
         except Exception as e:
             print(f"   ⚠️ Render error on P{page.number}: {e}")
 
