@@ -67,6 +67,26 @@ class TextLine:
 
 
 @dataclass
+class TextSegment:
+    """Contiguous text segment within a line (split by big horizontal gaps)"""
+    spans: List[TextSpan]
+    bbox: Tuple[float, float, float, float]
+    text: str
+
+    @property
+    def avg_font_size(self) -> float:
+        if not self.spans:
+            return 10
+        return sum(s.font_size for s in self.spans) / len(self.spans)
+
+    @property
+    def origin(self) -> Tuple[float, float]:
+        for s in self.spans:
+            if s.origin:
+                return s.origin
+        return (self.bbox[0], self.bbox[3])
+
+@dataclass
 class TextBlock:
     """Paragraph of lines"""
     lines: List[TextLine]
@@ -532,33 +552,92 @@ class SpanBasedTranslator:
         
         return TextBlock(lines=block_lines, bbox=(x0, y0, x1, y1))
 
+    def _split_line_segments(self, line: TextLine) -> List[TextSegment]:
+        """Split a line into segments based on large horizontal gaps (columns)."""
+        if not line.spans:
+            return []
+
+        spans = sorted(line.spans, key=lambda s: s.bbox[0])
+        segments: List[TextSegment] = []
+
+        current_spans: List[TextSpan] = []
+        current_text = ""
+        x0 = y0 = x1 = y1 = None
+        last_x1 = None
+
+        gap_threshold = max(8.0, line.avg_font_size * 1.1)
+        space_threshold = max(2.0, line.avg_font_size * 0.25)
+
+        def _flush():
+            nonlocal current_spans, current_text, x0, y0, x1, y1
+            if not current_spans:
+                return
+            seg = TextSegment(
+                spans=current_spans,
+                bbox=(x0, y0, x1, y1),
+                text=current_text.strip()
+            )
+            segments.append(seg)
+            current_spans = []
+            current_text = ""
+            x0 = y0 = x1 = y1 = None
+
+        for span in spans:
+            if not current_spans:
+                current_spans = [span]
+                current_text = span.text
+                x0, y0, x1, y1 = span.bbox
+                last_x1 = span.bbox[2]
+                continue
+
+            gap = span.bbox[0] - (last_x1 or span.bbox[0])
+            if gap > gap_threshold:
+                _flush()
+                current_spans = [span]
+                current_text = span.text
+                x0, y0, x1, y1 = span.bbox
+                last_x1 = span.bbox[2]
+                continue
+
+            if gap > space_threshold and current_text and not current_text.endswith(" ") and not span.text.startswith(" "):
+                current_text += " "
+            current_text += span.text
+            current_spans.append(span)
+            x0 = min(x0, span.bbox[0])
+            y0 = min(y0, span.bbox[1])
+            x1 = max(x1, span.bbox[2])
+            y1 = max(y1, span.bbox[3])
+            last_x1 = span.bbox[2]
+
+        _flush()
+        return segments
+
     def _translate_and_render_page(self, page: fitz.Page, blocks: List[TextBlock],
                                    source_lang: str, target_lang: str):
-        """Translate all lines and render on page (line-level for strict layout)"""
+        """Translate all segments and render on page (segment-level for strict layout)"""
         
-        # Çevrilecek satırları topla
         texts_to_translate = []
-        line_indices = []  # (block_idx, line_idx)
+        segment_keys = []  # (block_idx, line_idx, seg_idx)
+        segments_map: Dict[Tuple[int, int, int], TextSegment] = {}
         
         for b_idx, block in enumerate(blocks):
             for l_idx, line in enumerate(block.lines):
-                original_text = line.full_text.strip()
-                
-                # Skip empty or very short text
-                if len(original_text) < 2:
-                    continue
-                
-                # Skip if only numbers/symbols
-                if self._is_number_or_symbol(original_text):
-                    continue
-                
-                texts_to_translate.append(original_text)
-                line_indices.append((b_idx, l_idx))
+                segments = self._split_line_segments(line)
+                for s_idx, seg in enumerate(segments):
+                    original_text = seg.text.strip()
+                    if len(original_text) < 2:
+                        continue
+                    if self._is_number_or_symbol(original_text):
+                        continue
+                    key = (b_idx, l_idx, s_idx)
+                    texts_to_translate.append(original_text)
+                    segment_keys.append(key)
+                    segments_map[key] = seg
         
         if not texts_to_translate:
             return
 
-        print(f"   📦 Batch çeviri: {len(texts_to_translate)} satır")
+        print(f"   📦 Batch çeviri: {len(texts_to_translate)} segment")
 
         translations = {}
         from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -569,7 +648,7 @@ class SpanBasedTranslator:
         for batch_start in range(0, len(texts_to_translate), batch_size):
             batch_end = min(batch_start + batch_size, len(texts_to_translate))
             batch_texts = texts_to_translate[batch_start:batch_end]
-            batch_keys = line_indices[batch_start:batch_end]
+            batch_keys = segment_keys[batch_start:batch_end]
 
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_key = {}
@@ -589,52 +668,43 @@ class SpanBasedTranslator:
                         if result.success and result.text:
                             translations[key] = result.text
                     except Exception as e:
-                        print(f"   ⚠️ Satır hatası: {str(e)[:50]}")
+                        print(f"   ⚠️ Segment hatası: {str(e)[:50]}")
         
-        # 🎨 Rendering phase
         if translations:
-            print(f"   🎨 Rendering {len(translations)} satır...")
+            print(f"   🎨 Rendering {len(translations)} segment...")
             
-            # 1. Redact ALL lines first to clear background
-            bg_colors = {}  # (b_idx, l_idx) -> bg_color
+            bg_colors = {}
             for key in translations.keys():
-                b_idx, l_idx = key
-                line = blocks[b_idx].lines[l_idx]
-                rect = fitz.Rect(line.bbox)
-                
-                # Detect background color
+                seg = segments_map[key]
+                rect = fitz.Rect(seg.bbox)
                 bg_color = self._get_bg_color(page, rect)
                 bg_colors[key] = bg_color
-                
-                # Minimal expand for coverage
                 expanded_rect = fitz.Rect(rect.x0 - 0.1, rect.y0 - 0.1, rect.x1 + 0.1, rect.y1 + 0.1)
                 page.add_redact_annot(expanded_rect, fill=bg_color)
             
             page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
             
-            # 2. Insert translated lines
             for key, translated_text in translations.items():
-                b_idx, l_idx = key
-                line = blocks[b_idx].lines[l_idx]
+                seg = segments_map[key]
                 bg = bg_colors.get(key, (1, 1, 1))
-                self._render_translated_line(page, line, translated_text, bg_color=bg)
+                self._render_translated_segment(page, seg, translated_text, bg_color=bg)
 
-    def _render_translated_line(self, page: fitz.Page, line: TextLine, translated: str,
-                                bg_color: Tuple[float, float, float] = (1, 1, 1)):
-        """Render translated text in place of original line (strict bbox, no wrapping)"""
+    def _render_translated_segment(self, page: fitz.Page, seg: TextSegment, translated: str,
+                                   bg_color: Tuple[float, float, float] = (1, 1, 1)):
+        """Render translated text in place of original segment (strict bbox, no wrapping)"""
         try:
             translated = str(translated).encode("utf-8").decode("utf-8")
             # Transliterasyon HER ZAMAN açık
             translated = self._sanitize_text(translated)
 
-            rect = fitz.Rect(line.bbox)
+            rect = fitz.Rect(seg.bbox)
             bg_brightness = (bg_color[0] + bg_color[1] + bg_color[2]) / 3
             text_color = (1, 1, 1) if bg_brightness < 0.45 else (0, 0, 0)
 
             # Style from first span
             style = "regular"
-            if line.spans:
-                span = line.spans[0]
+            if seg.spans:
+                span = seg.spans[0]
                 if span.is_bold and span.is_italic:
                     style = "bold_italic"
                 elif span.is_bold:
@@ -645,8 +715,8 @@ class SpanBasedTranslator:
             font_name = self._get_page_font(page, style=style)
 
             # Preserve original text color if contrast ok
-            if line.spans:
-                c_int = line.spans[0].color
+            if seg.spans:
+                c_int = seg.spans[0].color
                 if isinstance(c_int, int):
                     r = ((c_int >> 16) & 0xFF) / 255.0
                     g = ((c_int >> 8) & 0xFF) / 255.0
@@ -661,17 +731,17 @@ class SpanBasedTranslator:
             # Baseline koordinatları (span origin varsa onu kullan)
             base_x = rect.x0
             base_y = rect.y1 - max(1.0, line.avg_font_size * 0.2)
-            if line.spans and line.spans[0].origin:
+            if seg.spans and seg.origin:
                 try:
-                    base_x = min(s.origin[0] for s in line.spans if s.origin)
-                    base_y = line.spans[0].origin[1]
+                    base_x = min(s.origin[0] for s in seg.spans if s.origin)
+                    base_y = seg.origin[1]
                 except Exception:
                     base_x = rect.x0
-                    base_y = rect.y1 - max(1.0, line.avg_font_size * 0.2)
+                    base_y = rect.y1 - max(1.0, seg.avg_font_size * 0.2)
 
             # Font boyutunu genişliğe sığdır (tek satır, wrap yok)
             max_width = rect.width
-            current_font_size = line.avg_font_size
+            current_font_size = seg.avg_font_size
             for _ in range(12):
                 try:
                     text_width = fitz.get_text_length(translated, fontname=font_name, fontsize=current_font_size)
