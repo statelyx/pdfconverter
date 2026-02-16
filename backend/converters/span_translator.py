@@ -630,6 +630,11 @@ class SpanBasedTranslator:
         """Calc fit params (ok, font_size, scale_x) for segment bbox."""
         rect = fitz.Rect(seg.bbox)
         max_width = rect.width
+        # Geniş alanlarda daha agresif yatay sıkıştırma izni
+        if max_width >= 220:
+            min_scale_x = min(min_scale_x, 0.55)
+        elif max_width >= 140:
+            min_scale_x = min(min_scale_x, 0.60)
         style = self._segment_style(seg)
         font_name = self._get_page_font(page, style=style)
 
@@ -671,18 +676,28 @@ class SpanBasedTranslator:
         texts_to_translate = []
         segment_keys = []  # (block_idx, line_idx, seg_idx)
         segments_map: Dict[Tuple[int, int, int], TextSegment] = {}
+        segment_jobs: Dict[Tuple[int, int, int], Dict] = {}
         
         for b_idx, block in enumerate(blocks):
             for l_idx, line in enumerate(block.lines):
                 segments = self._split_line_segments(line)
                 for s_idx, seg in enumerate(segments):
-                    original_text = seg.text.strip()
+                    raw_text = seg.text
+                    original_text = raw_text.strip()
                     if len(original_text) < 2:
                         continue
                     if self._is_number_or_symbol(original_text):
                         continue
                     key = (b_idx, l_idx, s_idx)
-                    texts_to_translate.append(original_text)
+                    # "Label: value" kalıbında sadece label'ı çevir, value'yu koru
+                    job = {"mode": "full", "text": original_text}
+                    if ":" in raw_text:
+                        left, right = raw_text.split(":", 1)
+                        left_clean = left.strip()
+                        if left_clean and len(left_clean) <= 40:
+                            job = {"mode": "label", "text": left_clean, "tail": right}
+                    segment_jobs[key] = job
+                    texts_to_translate.append(job["text"])
                     segment_keys.append(key)
                     segments_map[key] = seg
         
@@ -718,7 +733,13 @@ class SpanBasedTranslator:
                     try:
                         result = future.result(timeout=20)
                         if result.success and result.text:
-                            translations[key] = result.text
+                            job = segment_jobs.get(key, {"mode": "full"})
+                            if job.get("mode") == "label":
+                                # Orijinal ":" ve value kısmını koru
+                                tail = job.get("tail", "")
+                                translations[key] = f"{result.text}:{tail}"
+                            else:
+                                translations[key] = result.text
                     except Exception as e:
                         print(f"   ⚠️ Segment hatası: {str(e)[:50]}")
         
