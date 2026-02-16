@@ -730,7 +730,7 @@ class SpanBasedTranslator:
 
             # Baseline koordinatları (span origin varsa onu kullan)
             base_x = rect.x0
-            base_y = rect.y1 - max(1.0, line.avg_font_size * 0.2)
+            base_y = rect.y1 - max(1.0, seg.avg_font_size * 0.2)
             if seg.spans and seg.origin:
                 try:
                     base_x = min(s.origin[0] for s in seg.spans if s.origin)
@@ -741,19 +741,27 @@ class SpanBasedTranslator:
 
             # Font boyutunu genişliğe sığdır (tek satır, wrap yok)
             max_width = rect.width
+            min_font_size = 6
             current_font_size = seg.avg_font_size
+            text_to_draw = translated
+            text_width = None
             for _ in range(12):
                 try:
-                    text_width = fitz.get_text_length(translated, fontname=font_name, fontsize=current_font_size)
+                    text_width = fitz.get_text_length(text_to_draw, fontname=font_name, fontsize=current_font_size)
                 except Exception:
                     text_width = max_width + 1  # güvenli fallback
-                if text_width <= max_width or current_font_size <= 5:
+                if text_width <= max_width or current_font_size <= min_font_size:
                     break
-                current_font_size = max(5, current_font_size * 0.92)
+                current_font_size = max(min_font_size, current_font_size * 0.92)
+
+            # Hâlâ sığmıyorsa orijinal metne dön (layout bozulmasın)
+            if text_width is not None and text_width > max_width and current_font_size <= min_font_size:
+                text_to_draw = self._sanitize_text(seg.text)
+                current_font_size = seg.avg_font_size
 
             page.insert_text(
                 fitz.Point(base_x, base_y),
-                translated,
+                text_to_draw,
                 fontsize=current_font_size,
                 fontname=font_name,
                 color=text_color
