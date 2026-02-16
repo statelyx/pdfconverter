@@ -534,30 +534,31 @@ class SpanBasedTranslator:
 
     def _translate_and_render_page(self, page: fitz.Page, blocks: List[TextBlock],
                                    source_lang: str, target_lang: str):
-        """Translate all blocks and render on page"""
+        """Translate all lines and render on page (line-level for strict layout)"""
         
-        # Çevrilecek metinleri topla
+        # Çevrilecek satırları topla
         texts_to_translate = []
-        block_indices = []
+        line_indices = []  # (block_idx, line_idx)
         
-        for i, block in enumerate(blocks):
-            original_text = block.full_text.strip()
-            
-            # Skip empty or very short text
-            if len(original_text) < 2:
-                continue
-            
-            # Skip if only numbers/symbols
-            if self._is_number_or_symbol(original_text):
-                continue
-            
-            texts_to_translate.append(original_text)
-            block_indices.append(i)
+        for b_idx, block in enumerate(blocks):
+            for l_idx, line in enumerate(block.lines):
+                original_text = line.full_text.strip()
+                
+                # Skip empty or very short text
+                if len(original_text) < 2:
+                    continue
+                
+                # Skip if only numbers/symbols
+                if self._is_number_or_symbol(original_text):
+                    continue
+                
+                texts_to_translate.append(original_text)
+                line_indices.append((b_idx, l_idx))
         
         if not texts_to_translate:
             return
 
-        print(f"   📦 Batch çeviri: {len(texts_to_translate)} blok")
+        print(f"   📦 Batch çeviri: {len(texts_to_translate)} satır")
 
         translations = {}
         from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -568,53 +569,115 @@ class SpanBasedTranslator:
         for batch_start in range(0, len(texts_to_translate), batch_size):
             batch_end = min(batch_start + batch_size, len(texts_to_translate))
             batch_texts = texts_to_translate[batch_start:batch_end]
-            batch_indices = block_indices[batch_start:batch_end]
+            batch_keys = line_indices[batch_start:batch_end]
 
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                future_to_idx = {}
+                future_to_key = {}
                 for j, text in enumerate(batch_texts):
-                    idx = batch_indices[j]
-                    future_to_idx[executor.submit(
+                    key = batch_keys[j]
+                    future_to_key[executor.submit(
                         self.translator.translate,
                         text,
                         target_lang=target_lang,
                         source_lang=source_lang
-                    )] = idx
+                    )] = key
 
-                for future in as_completed(future_to_idx):
-                    idx = future_to_idx[future]
+                for future in as_completed(future_to_key):
+                    key = future_to_key[future]
                     try:
                         result = future.result(timeout=20)
                         if result.success and result.text:
-                            translations[idx] = result.text
+                            translations[key] = result.text
                     except Exception as e:
-                        print(f"   ⚠️ Block {idx+1} hatası: {str(e)[:50]}")
+                        print(f"   ⚠️ Satır hatası: {str(e)[:50]}")
         
         # 🎨 Rendering phase
         if translations:
-            print(f"   🎨 Rendering {len(translations)} blocks...")
+            print(f"   🎨 Rendering {len(translations)} satır...")
             
-            # 1. Redact ALL blocks first to clear background
-            bg_colors = {}  # idx -> bg_color (render'da kullanılacak)
-            for idx in translations.keys():
-                block = blocks[idx]
-                rect = fitz.Rect(block.bbox)
+            # 1. Redact ALL lines first to clear background
+            bg_colors = {}  # (b_idx, l_idx) -> bg_color
+            for key in translations.keys():
+                b_idx, l_idx = key
+                line = blocks[b_idx].lines[l_idx]
+                rect = fitz.Rect(line.bbox)
                 
                 # Detect background color
                 bg_color = self._get_bg_color(page, rect)
-                bg_colors[idx] = bg_color
+                bg_colors[key] = bg_color
                 
-                # Expand slightly for full coverage
-                expanded_rect = fitz.Rect(rect.x0 - 0.2, rect.y0 - 0.2, rect.x1 + 0.2, rect.y1 + 0.2)
+                # Minimal expand for coverage
+                expanded_rect = fitz.Rect(rect.x0 - 0.1, rect.y0 - 0.1, rect.x1 + 0.1, rect.y1 + 0.1)
                 page.add_redact_annot(expanded_rect, fill=bg_color)
             
             page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
             
-            # 2. Insert translated blocks
-            for idx, translated_text in translations.items():
-                block = blocks[idx]
-                bg = bg_colors.get(idx, (1, 1, 1))
-                self._render_translated_block(page, block, translated_text, bg_color=bg)
+            # 2. Insert translated lines
+            for key, translated_text in translations.items():
+                b_idx, l_idx = key
+                line = blocks[b_idx].lines[l_idx]
+                bg = bg_colors.get(key, (1, 1, 1))
+                self._render_translated_line(page, line, translated_text, bg_color=bg)
+
+    def _render_translated_line(self, page: fitz.Page, line: TextLine, translated: str,
+                                bg_color: Tuple[float, float, float] = (1, 1, 1)):
+        """Render translated text in place of original line (strict bbox)"""
+        try:
+            translated = str(translated).encode("utf-8").decode("utf-8")
+            # Transliterasyon HER ZAMAN açık
+            translated = self._sanitize_text(translated)
+
+            rect = fitz.Rect(line.bbox)
+            bg_brightness = (bg_color[0] + bg_color[1] + bg_color[2]) / 3
+            text_color = (1, 1, 1) if bg_brightness < 0.45 else (0, 0, 0)
+
+            # Style from first span
+            style = "regular"
+            if line.spans:
+                span = line.spans[0]
+                if span.is_bold and span.is_italic:
+                    style = "bold_italic"
+                elif span.is_bold:
+                    style = "bold"
+                elif span.is_italic:
+                    style = "italic"
+
+            font_name = self._get_page_font(page, style=style)
+
+            # Preserve original text color if contrast ok
+            if line.spans:
+                c_int = line.spans[0].color
+                if isinstance(c_int, int):
+                    r = ((c_int >> 16) & 0xFF) / 255.0
+                    g = ((c_int >> 8) & 0xFF) / 255.0
+                    b = (c_int & 0xFF) / 255.0
+                    original_text_color = (r, g, b)
+                    text_brightness = (r + g + b) / 3
+                    if (bg_brightness < 0.45 and text_brightness < 0.45) or (bg_brightness > 0.6 and text_brightness > 0.6):
+                        text_color = (1, 1, 1) if bg_brightness < 0.45 else (0, 0, 0)
+                    else:
+                        text_color = original_text_color
+
+            font_size = line.avg_font_size
+            align = fitz.TEXT_ALIGN_LEFT
+
+            current_font_size = font_size
+            rc = -1
+            attempt = 0
+            while rc < 0 and attempt < 10:
+                rc = page.insert_textbox(
+                    rect,
+                    translated,
+                    fontsize=current_font_size,
+                    fontname=font_name,
+                    color=text_color,
+                    align=align
+                )
+                if rc < 0:
+                    current_font_size = max(5, current_font_size * 0.90)
+                    attempt += 1
+        except Exception as e:
+            print(f"   ⚠️ Render error on P{page.number}: {e}")
 
     def _render_translated_block(self, page: fitz.Page, block: TextBlock, translated: str, bg_color: Tuple[float, float, float] = (1, 1, 1)):
         """Render translated text in place of original block
