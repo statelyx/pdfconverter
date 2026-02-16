@@ -76,6 +76,12 @@ FONTS = {
         "regular": os.path.join(FONT_DIR, "NotoSans-Regular.ttf"),
         "bold": os.path.join(FONT_DIR, "NotoSans-Bold.ttf")
     },
+    "open-sans": {
+        "regular": os.path.join(FONT_DIR, "Open_Sans", "OpenSans-Regular.ttf"),
+        "bold": os.path.join(FONT_DIR, "Open_Sans", "OpenSans-Bold.ttf"),
+        "italic": os.path.join(FONT_DIR, "Open_Sans", "OpenSans-Italic.ttf"),
+        "bold_italic": os.path.join(FONT_DIR, "Open_Sans", "OpenSans-BoldItalic.ttf")
+    },
     "ltflode": {
         "regular": os.path.join(ROOT_FONT_DIR, "LTFlodeNeue-Regular.otf"),
         "bold": os.path.join(ROOT_FONT_DIR, "LTFlodeNeue-Bold.otf"),
@@ -94,7 +100,7 @@ FONTS = {
 }
 
 # Varsayılan Font - Arial Türkçe karakter desteği için en güvenilir
-DEFAULT_FONT = "arial"
+DEFAULT_FONT = "open-sans"
 DEFAULT_FONT_STYLE = "regular"
 
 # Dil Kodları ve İsimleri

@@ -102,6 +102,8 @@ class SpanBasedTranslator:
         self._page_fonts = set()  # fonts already inserted into current page
         self._font_buffer_cache = {}  # font_key -> bytes (font data cache)
         self._turkish_font = True  # Font Türkçe karakter destekliyor mu?
+        self._notos_available = None  # None=unknown, True/False
+        self._notos_error_logged = False
 
     @staticmethod
     def _sanitize_text(text: str) -> str:
@@ -199,41 +201,50 @@ class SpanBasedTranslator:
         3. Sistem fontları (DejaVu, Arial — fontbuffer ile)
         4. Son çare: helv + transliterasyon
         """
-        from config import FONTS, DEFAULT_FONT, ROOT_FONT_DIR
+        from config import FONTS, DEFAULT_FONT, ROOT_FONT_DIR, FONT_DIR
         
         # ---- ADIM 1: PyMuPDF yerleşik font (EN GÜVENİLİR) ----
         # fitz.Font("notos") = Noto Sans, Türkçe dahil 600+ dil desteği
         # Bu font PyMuPDF ile birlikte gelir, kurulum gerektirmez
         notos_key = f"TRFON_notos_{style}".lower()
-        if notos_key not in self._page_fonts:
-            try:
-                # fitz.Font ile buffer al
-                if notos_key not in self._font_buffer_cache:
+        notos_base_key = "trfon_notos_base"
+        if self._notos_available is not False:
+            if self._notos_available is None:
+                try:
                     builtin_font = fitz.Font("notos")
                     buf = builtin_font.buffer
                     if buf and len(buf) > 100:
-                        self._font_buffer_cache[notos_key] = buf
+                        self._font_buffer_cache[notos_base_key] = buf
+                        self._notos_available = True
                         print(f"   ✅ PyMuPDF 'notos' fontu yüklendi ({len(buf)} bytes)")
-                
-                if notos_key in self._font_buffer_cache:
+                    else:
+                        raise Exception("notos font buffer bos")
+                except Exception as e:
+                    self._notos_available = False
+                    if not self._notos_error_logged:
+                        print(f"   ⚠️ notos font hatası: {e}")
+                        self._notos_error_logged = True
+
+            if self._notos_available and notos_base_key in self._font_buffer_cache:
+                if notos_key not in self._page_fonts:
                     page.insert_font(
                         fontname=notos_key,
-                        fontbuffer=self._font_buffer_cache[notos_key]
+                        fontbuffer=self._font_buffer_cache[notos_base_key]
                     )
                     self._page_fonts.add(notos_key)
                     self._font_info[notos_key] = "(builtin-notos)"
-                    self._turkish_font = True
-                    return notos_key
-            except Exception as e:
-                print(f"   ⚠️ notos font hatası: {e}")
-        else:
-            # Zaten bu sayfada eklendi
-            self._turkish_font = True
-            return notos_key
+                self._turkish_font = True
+                return notos_key
         
         # ---- ADIM 2: Dosyadan fontbuffer ile yükle ----
         # Font dosyasını byte olarak okuyup buffer ile ekle (daha güvenilir)
         font_paths_to_try = []
+        seen_paths = set()
+
+        def _add_font_path(label: str, path: str):
+            if path and path not in seen_paths:
+                font_paths_to_try.append((label, path))
+                seen_paths.add(path)
         
         # Config'deki font aileleri
         font_families = [DEFAULT_FONT, "ltflode", "binoma", "dejavu-sans"]
@@ -244,7 +255,7 @@ class SpanBasedTranslator:
             seen.add(family)
             path = FONTS.get(family, {}).get(style) or FONTS.get(family, {}).get("regular")
             if path:
-                font_paths_to_try.append((family, path))
+                _add_font_path(family, path)
         
         # Linux sistem fontları
         if os.name == 'posix':
@@ -254,7 +265,7 @@ class SpanBasedTranslator:
                 "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
                 "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
             ]:
-                font_paths_to_try.append(("system", lpath))
+                _add_font_path("system", lpath)
         
         # Windows fontları
         if os.name == 'nt':
@@ -263,13 +274,19 @@ class SpanBasedTranslator:
                         "italic": "C:\\Windows\\Fonts\\ariali.ttf"}
             wp = win_path.get(style) or win_path.get("regular")
             if wp:
-                font_paths_to_try.append(("arial_win", wp))
+                _add_font_path("arial_win", wp)
         
         # Proje fontları (fonts/ dizini)
-        if os.path.isdir(ROOT_FONT_DIR):
-            for fname in os.listdir(ROOT_FONT_DIR):
-                if fname.lower().endswith(('.ttf', '.otf')):
-                    font_paths_to_try.append(("project", os.path.join(ROOT_FONT_DIR, fname)))
+        def _add_fonts_from_dir(base_dir: str):
+            if not os.path.isdir(base_dir):
+                return
+            for root, _, files in os.walk(base_dir):
+                for fname in files:
+                    if fname.lower().endswith(('.ttf', '.otf')):
+                        _add_font_path("project", os.path.join(root, fname))
+
+        _add_fonts_from_dir(ROOT_FONT_DIR)
+        _add_fonts_from_dir(FONT_DIR)
         
         # Hepsini dene
         for family_name, fpath in font_paths_to_try:
