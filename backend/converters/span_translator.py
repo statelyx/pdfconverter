@@ -771,6 +771,10 @@ class SpanBasedTranslator:
             
             page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
             
+            # apply_redactions() sayfa font kaynaklarını geçersiz kılabilir
+            # Cache'i temizle ki fontlar yeniden eklensin
+            self._page_fonts = set()
+            
             for key, translated_text in render_translations.items():
                 seg = segments_map[key]
                 bg = bg_colors.get(key, (1, 1, 1))
