@@ -352,13 +352,68 @@ class SpanBasedTranslator:
     def _get_bg_color(self, page: fitz.Page, rect: fitz.Rect) -> Tuple[float, float, float]:
         """Metin bloğunun arka plan rengini doğru algıla
         
-        Strateji: rect'in İÇİNDEN ama köşe bölgelerinden örnekle.
-        Metin pikselleri koyu olacağı için filtrelenir.
-        Tablo çizgileri de filtrelenir.
+        Strateji: rect'in dışına çıkarak satırın arka plan rengini örnekle.
+        Böylece metin pikselleri ve tablo çizgileri sorun olmaz.
+        Eğer dış örnekleme başarısız olursa, iç örnekleme ile devam et.
         """
         try:
-            # Rect'i biraz küçült (tablo çizgilerinden kaçın)
-            inset = 2
+            page_rect = page.rect
+            
+            # Önce rect'in SOLUNA ve SAĞINA bakarak satır arka planını bul
+            # Bu, metin ve tablo çizgilerinden kaçınmanın en güvenilir yolu
+            margin = 4
+            outer_samples = []
+            
+            # Sol taraf (rect'in hemen solundan örnekle)
+            if rect.x0 > margin + 2:
+                left_rect = fitz.Rect(
+                    rect.x0 - margin, rect.y0 + 2,
+                    rect.x0 - 1, rect.y1 - 2
+                )
+                left_rect = left_rect & page_rect
+                if not left_rect.is_empty and left_rect.width >= 1 and left_rect.height >= 2:
+                    try:
+                        pix = page.get_pixmap(clip=left_rect, colorspace=fitz.csRGB)
+                        if pix.width >= 1 and pix.height >= 1:
+                            c = pix.pixel(pix.width // 2, pix.height // 2)
+                            outer_samples.append(c)
+                    except:
+                        pass
+            
+            # Sağ taraf
+            if rect.x1 < page_rect.x1 - margin - 2:
+                right_rect = fitz.Rect(
+                    rect.x1 + 1, rect.y0 + 2,
+                    rect.x1 + margin, rect.y1 - 2
+                )
+                right_rect = right_rect & page_rect
+                if not right_rect.is_empty and right_rect.width >= 1 and right_rect.height >= 2:
+                    try:
+                        pix = page.get_pixmap(clip=right_rect, colorspace=fitz.csRGB)
+                        if pix.width >= 1 and pix.height >= 1:
+                            c = pix.pixel(pix.width // 2, pix.height // 2)
+                            outer_samples.append(c)
+                    except:
+                        pass
+            
+            # Dış örneklerden tutarlı bir renk bulunduysa kullan
+            if outer_samples:
+                # Çok koyu olanları filtrele (tablo çizgisi olabilir)
+                light_samples = [c for c in outer_samples if (c[0] + c[1] + c[2]) / 3 > 40]
+                if light_samples:
+                    avg = light_samples[0]  # İlk geçerli örneği kullan
+                    return (avg[0] / 255, avg[1] / 255, avg[2] / 255)
+                # Hepsi koyuysa ve tutarlıysa, koyu arka plan
+                if len(outer_samples) >= 2:
+                    c1, c2 = outer_samples[0], outer_samples[1]
+                    if abs(c1[0] - c2[0]) < 30 and abs(c1[1] - c2[1]) < 30 and abs(c1[2] - c2[2]) < 30:
+                        avg_r = (c1[0] + c2[0]) / 2 / 255
+                        avg_g = (c1[1] + c2[1]) / 2 / 255
+                        avg_b = (c1[2] + c2[2]) / 2 / 255
+                        return (avg_r, avg_g, avg_b)
+            
+            # Fallback: iç örnekleme (eski yöntem ama daha büyük inset ile)
+            inset = 4
             sample_rect = fitz.Rect(
                 rect.x0 + inset, rect.y0 + inset,
                 rect.x1 - inset, rect.y1 - inset
@@ -627,7 +682,11 @@ class SpanBasedTranslator:
 
     def _calc_fit(self, page: fitz.Page, seg: TextSegment, text: str,
                   min_font_size: float = 5.0, min_scale_x: float = 0.70) -> Tuple[bool, float, float]:
-        """Calc fit params (ok, font_size, scale_x) for segment bbox."""
+        """Calc fit params (ok, font_size, scale_x) for segment bbox.
+        
+        Font boyutu orijinalin %75'inden aşağı düşmez — okunabilirlik korunur.
+        Sığmazsa yatay sıkıştırma (scale_x) ile çözülür.
+        """
         rect = fitz.Rect(seg.bbox)
         max_width = rect.width
         # Geniş alanlarda daha agresif yatay sıkıştırma izni
@@ -638,7 +697,11 @@ class SpanBasedTranslator:
         style = self._segment_style(seg)
         font_name = self._get_page_font(page, style=style)
 
-        current_font_size = seg.avg_font_size
+        original_font_size = seg.avg_font_size
+        # Font boyutu orijinalin %75'inden aşağı düşmesin
+        effective_min = max(min_font_size, original_font_size * 0.75)
+        
+        current_font_size = original_font_size
         text_width = None
         for _ in range(12):
             try:
@@ -647,11 +710,11 @@ class SpanBasedTranslator:
                 text_width = max_width + 1
             if text_width <= max_width:
                 return True, current_font_size, 1.0
-            if current_font_size <= min_font_size:
+            if current_font_size <= effective_min:
                 break
-            current_font_size = max(min_font_size, current_font_size * 0.92)
+            current_font_size = max(effective_min, current_font_size * 0.95)
 
-        # Still not fit: try horizontal squeeze at min font size
+        # Still not fit: try horizontal squeeze at current font size
         if text_width is None:
             return False, current_font_size, 1.0
 
